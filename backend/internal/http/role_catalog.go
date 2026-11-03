@@ -3,9 +3,13 @@ package http
 import "net/http"
 
 // roleCatalogHandler serves GET /api/role-catalog (public, read-only). Den
-// roles come from the IdP: `den-admin` → convention admin; every signed-in
-// user is a member automatically.
-func roleCatalogHandler() http.HandlerFunc {
+// roles come from the IdP: the first admin group → convention admin; every
+// signed-in user is a member automatically.
+func roleCatalogHandler(adminGroups []string) http.HandlerFunc {
+	adminGroup := ""
+	if len(adminGroups) > 0 {
+		adminGroup = adminGroups[0]
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"module":       "den",
@@ -16,8 +20,8 @@ func roleCatalogHandler() http.HandlerFunc {
 					"key":         "admin",
 					"label":       "Convention admin",
 					"description": "Manage modules, pairing, branding and portal settings.",
-					"group":       "den-admin",
-					"assignable":  true,
+					"group":       adminGroup,
+					"assignable":  adminGroup != "",
 					"scope":       "organization",
 					"permissions": []string{"modules.manage", "branding.manage", "settings.manage"},
 				},

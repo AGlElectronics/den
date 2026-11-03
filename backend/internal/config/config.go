@@ -43,6 +43,8 @@ type Config struct {
 	OIDCClientID   string
 	OIDCAudience   string
 	DevDefaultUser string
+	// AdminGroups are the IdP groups whose members are org admins.
+	AdminGroups []string
 
 	CORSAllowedOrigins []string
 
@@ -70,6 +72,7 @@ func Load() (*Config, error) {
 		OIDCClientID:       getEnv("OIDC_CLIENT_ID", ""),
 		OIDCAudience:       getEnv("OIDC_AUDIENCE", ""),
 		DevDefaultUser:     getEnv("DEV_DEFAULT_USER", "dev-admin"),
+		AdminGroups:        splitCSV(getEnv("DEN_ADMIN_GROUPS", "den-admin")),
 		CORSAllowedOrigins: splitCSV(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3001")),
 		ShutdownTimeout:    getEnvDuration("SHUTDOWN_TIMEOUT", 15*time.Second),
 	}

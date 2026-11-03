@@ -21,11 +21,13 @@ var defaultOrgID = uuid.MustParse("00000000-0000-0000-0000-00000000d001")
 // sqlc-driven so the scaffold builds without a `sqlc generate` step; the
 // queries themselves are tiny and stable.
 type Resolver struct {
-	pool *pgxpool.Pool
+	pool        *pgxpool.Pool
+	adminGroups []string
 }
 
-func NewResolver(pool *pgxpool.Pool) *Resolver {
-	return &Resolver{pool: pool}
+// NewResolver builds a resolver; members of adminGroups are org admins.
+func NewResolver(pool *pgxpool.Pool, adminGroups []string) *Resolver {
+	return &Resolver{pool: pool, adminGroups: adminGroups}
 }
 
 // LoadOrProvisionDevUser is called from dev-mode middleware. The name is
@@ -130,8 +132,9 @@ func (r *Resolver) provisionDevUser(ctx context.Context, name string) (uuid.UUID
 }
 
 // LoadOrProvisionOIDCUser upserts the local user from verified ID-token
-// claims and ensures org membership. Users in the IdP group `den-admin`
-// become admins of the default org (same default as AUTH_MODE=dev).
+// claims and syncs their default-org role from the IdP on every request:
+// members of an admin group are admins, everyone else is a member. Removing
+// someone from the group demotes them; an "owner" row is never changed.
 func (r *Resolver) LoadOrProvisionOIDCUser(ctx context.Context, claims *OIDCClaims) (*User, error) {
 	if claims == nil || claims.Subject == "" || claims.Issuer == "" {
 		return nil, errors.New("oidc claims missing issuer/subject")
@@ -152,28 +155,15 @@ func (r *Resolver) LoadOrProvisionOIDCUser(ctx context.Context, claims *OIDCClai
 	}
 
 	role := "member"
-	for _, g := range claims.Groups {
-		if g == "den-admin" {
-			role = "admin"
-			break
-		}
-	}
-	// MVP bootstrap: first Keycloak user into Den becomes org admin when no
-	// OIDC (non-dev) admin/owner exists yet — ignores the seed Dev Admin.
-	if role == "member" {
-		needs, berr := r.orgNeedsOIDCBootstrap(ctx, defaultOrgID)
-		if berr != nil {
-			return nil, fmt.Errorf("bootstrap check: %w", berr)
-		}
-		if needs {
-			role = "admin"
-		}
+	if InAnyGroup(claims.Groups, r.adminGroups) {
+		role = "admin"
 	}
 	if _, err := r.pool.Exec(ctx, `
 		INSERT INTO organization_memberships (organization_id, user_id, role)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (organization_id, user_id) DO UPDATE
 		  SET role = EXCLUDED.role
+		  WHERE organization_memberships.role <> 'owner'
 	`, defaultOrgID, userID, role); err != nil {
 		return nil, fmt.Errorf("ensure org membership: %w", err)
 	}
@@ -253,22 +243,21 @@ func (r *Resolver) provisionOIDCUser(
 	return userID, nil
 }
 
-// orgNeedsOIDCBootstrap is true when the org has no admin/owner bound to a
-// non-dev external identity yet (first real IdP login seeds convention admin).
-func (r *Resolver) orgNeedsOIDCBootstrap(ctx context.Context, orgID uuid.UUID) (bool, error) {
-	var n int
-	err := r.pool.QueryRow(ctx, `
-		SELECT COUNT(*)
-		  FROM organization_memberships om
-		  JOIN external_identities ei ON ei.user_id = om.user_id
-		 WHERE om.organization_id = $1
-		   AND om.role IN ('admin', 'owner')
-		   AND ei.issuer <> 'dev:'
-	`, orgID).Scan(&n)
-	if err != nil {
-		return false, err
+// InAnyGroup reports whether any token group matches one of want.
+// Comparison is case-insensitive and ignores a leading "/" (Keycloak's
+// full-path form).
+func InAnyGroup(groups, want []string) bool {
+	norm := func(s string) string { return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(s), "/")) }
+	set := map[string]struct{}{}
+	for _, w := range want {
+		set[norm(w)] = struct{}{}
 	}
-	return n == 0, nil
+	for _, g := range groups {
+		if _, ok := set[norm(g)]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Resolver) loadMemberships(ctx context.Context, userID uuid.UUID) ([]Membership, error) {

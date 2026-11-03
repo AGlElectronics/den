@@ -101,7 +101,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 
 	// --- Handlers -------------------------------------------------------------
 
-	resolver := auth.NewResolver(deps.Pool)
+	resolver := auth.NewResolver(deps.Pool, deps.Config.AdminGroups)
 	authMW := auth.Middleware(deps.Config, resolver, deps.OIDCVerifier)
 
 	modH := newModuleHandler(deps.Pool)
@@ -117,7 +117,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 	// --- API --------------------------------------------------------------
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/health", health.health)
-		api.Get("/role-catalog", roleCatalogHandler())
+		api.Get("/role-catalog", roleCatalogHandler(deps.Config.AdminGroups))
 
 		api.Route("/v1", func(v1 chi.Router) {
 			// --- Integration (server-to-server) -------------------------
