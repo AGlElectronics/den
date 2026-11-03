@@ -1,6 +1,7 @@
 import { setAuthHeadersResolver } from '@/api/client';
 import { installDevAuth } from '@/auth/dev';
 import { getUserManager, isOidcAuthMode } from '@/auth/oidc';
+import { installSessionSync } from '@/auth/session';
 
 /** Wire API auth: dev header or OIDC Bearer token. Call once at startup. */
 export function installAuth(): void {
@@ -23,6 +24,7 @@ export function installAuth(): void {
       }
       return { Authorization: `Bearer ${bearer}` };
     });
+    installSessionSync();
     return;
   }
   installDevAuth();
