@@ -1,0 +1,308 @@
+package auth
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// defaultOrgID matches the seed row in migrations/20260101000001_init.sql.
+// MVP binds every new dev user to this org as `admin`. Multi-tenant
+// provisioning will replace this with a role_assignments lookup.
+var defaultOrgID = uuid.MustParse("00000000-0000-0000-0000-00000000d001")
+
+// Resolver loads users (or provisions them if missing) from the users /
+// external_identities tables. It is deliberately pgxpool-driven rather than
+// sqlc-driven so the scaffold builds without a `sqlc generate` step; the
+// queries themselves are tiny and stable.
+type Resolver struct {
+	pool *pgxpool.Pool
+}
+
+func NewResolver(pool *pgxpool.Pool) *Resolver {
+	return &Resolver{pool: pool}
+}
+
+// LoadOrProvisionDevUser is called from dev-mode middleware. The name is
+// treated as the OIDC `subject` under the synthetic `dev:` issuer so dev
+// and OIDC paths share the same external_identities shape.
+func (r *Resolver) LoadOrProvisionDevUser(ctx context.Context, name string) (*User, error) {
+	if r == nil || r.pool == nil {
+		// Should not happen in production. Returning a zero user keeps
+		// local smoke tests of handlers that are DB-less from blowing up.
+		return &User{
+			ID:          uuid.New(),
+			DisplayName: name,
+			Issuer:      "dev:",
+			Subject:     name,
+		}, nil
+	}
+
+	const q = `
+		SELECT u.id, u.email, u.display_name
+		  FROM users u
+		  JOIN external_identities ei ON ei.user_id = u.id
+		 WHERE ei.issuer = 'dev:' AND ei.subject = $1
+	`
+	var (
+		userID      uuid.UUID
+		email       *string
+		displayName string
+	)
+	err := r.pool.QueryRow(ctx, q, name).Scan(&userID, &email, &displayName)
+	switch {
+	case err == nil:
+		// found, carry on
+	case errors.Is(err, pgx.ErrNoRows):
+		id, emailOut, displayOut, perr := r.provisionDevUser(ctx, name)
+		if perr != nil {
+			return nil, fmt.Errorf("provision dev user: %w", perr)
+		}
+		userID = id
+		email = emailOut
+		displayName = displayOut
+	default:
+		return nil, fmt.Errorf("lookup dev user: %w", err)
+	}
+
+	memberships, err := r.loadMemberships(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("load memberships: %w", err)
+	}
+
+	// Best-effort last_login_at touch; ignore the error.
+	_, _ = r.pool.Exec(ctx, `UPDATE users SET last_login_at = now() WHERE id = $1`, userID)
+
+	emailStr := ""
+	if email != nil {
+		emailStr = *email
+	}
+	return &User{
+		ID:          userID,
+		DisplayName: displayName,
+		Email:       emailStr,
+		Issuer:      "dev:",
+		Subject:     name,
+		Memberships: memberships,
+	}, nil
+}
+
+func (r *Resolver) provisionDevUser(ctx context.Context, name string) (uuid.UUID, *string, string, error) {
+	var (
+		userID      uuid.UUID
+		email       = fmt.Sprintf("%s@den.local", name)
+		displayName = name
+	)
+	err := WithTx(ctx, r.pool, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO users (email, display_name)
+			VALUES ($1, $2)
+			RETURNING id
+		`, email, displayName).Scan(&userID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO external_identities (user_id, issuer, subject, email)
+			VALUES ($1, 'dev:', $2, $3)
+		`, userID, name, email); err != nil {
+			return err
+		}
+		// Dev users are admins of the default org. Not production policy —
+		// just a sane default so the UI isn't a wasteland on first boot.
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO organization_memberships (organization_id, user_id, role)
+			VALUES ($1, $2, 'admin')
+			ON CONFLICT (organization_id, user_id) DO NOTHING
+		`, defaultOrgID, userID); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return uuid.Nil, nil, "", err
+	}
+	return userID, &email, displayName, nil
+}
+
+// LoadOrProvisionOIDCUser upserts the local user from verified ID-token
+// claims and ensures org membership. Users in the IdP group `den-admin`
+// become admins of the default org (same default as AUTH_MODE=dev).
+func (r *Resolver) LoadOrProvisionOIDCUser(ctx context.Context, claims *OIDCClaims) (*User, error) {
+	if claims == nil || claims.Subject == "" || claims.Issuer == "" {
+		return nil, errors.New("oidc claims missing issuer/subject")
+	}
+	if r == nil || r.pool == nil {
+		return nil, errors.New("resolver has no database")
+	}
+
+	display := displayNameFromClaims(claims)
+	var emailPtr *string
+	if e := strings.TrimSpace(claims.Email); e != "" {
+		emailPtr = &e
+	}
+
+	userID, err := r.upsertOIDCUser(ctx, claims.Issuer, claims.Subject, display, emailPtr)
+	if err != nil {
+		return nil, fmt.Errorf("upsert oidc user: %w", err)
+	}
+
+	role := "member"
+	for _, g := range claims.Groups {
+		if g == "den-admin" {
+			role = "admin"
+			break
+		}
+	}
+	// MVP bootstrap: first Keycloak user into Den becomes org admin when no
+	// OIDC (non-dev) admin/owner exists yet — ignores the seed Dev Admin.
+	if role == "member" {
+		needs, berr := r.orgNeedsOIDCBootstrap(ctx, defaultOrgID)
+		if berr != nil {
+			return nil, fmt.Errorf("bootstrap check: %w", berr)
+		}
+		if needs {
+			role = "admin"
+		}
+	}
+	if _, err := r.pool.Exec(ctx, `
+		INSERT INTO organization_memberships (organization_id, user_id, role)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (organization_id, user_id) DO UPDATE
+		  SET role = EXCLUDED.role
+	`, defaultOrgID, userID, role); err != nil {
+		return nil, fmt.Errorf("ensure org membership: %w", err)
+	}
+
+	memberships, err := r.loadMemberships(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("load memberships: %w", err)
+	}
+
+	email := ""
+	if emailPtr != nil {
+		email = *emailPtr
+	}
+	return &User{
+		ID:          userID,
+		DisplayName: display,
+		Email:       email,
+		Issuer:      claims.Issuer,
+		Subject:     claims.Subject,
+		Memberships: memberships,
+	}, nil
+}
+
+func (r *Resolver) upsertOIDCUser(
+	ctx context.Context,
+	issuer, subject, display string,
+	email *string,
+) (uuid.UUID, error) {
+	var userID uuid.UUID
+	err := r.pool.QueryRow(ctx,
+		`SELECT user_id FROM external_identities WHERE issuer = $1 AND subject = $2`,
+		issuer, subject,
+	).Scan(&userID)
+	switch {
+	case err == nil:
+		_, err = r.pool.Exec(ctx, `
+			UPDATE users
+			   SET display_name  = $2,
+			       email         = COALESCE($3, email),
+			       last_login_at = now(),
+			       updated_at    = now()
+			 WHERE id = $1
+		`, userID, display, email)
+		return userID, err
+	case errors.Is(err, pgx.ErrNoRows):
+		return r.provisionOIDCUser(ctx, issuer, subject, display, email)
+	default:
+		return uuid.Nil, err
+	}
+}
+
+func (r *Resolver) provisionOIDCUser(
+	ctx context.Context,
+	issuer, subject, display string,
+	email *string,
+) (uuid.UUID, error) {
+	var userID uuid.UUID
+	err := WithTx(ctx, r.pool, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO users (email, display_name, last_login_at)
+			VALUES ($1, $2, now())
+			RETURNING id
+		`, email, display).Scan(&userID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO external_identities (user_id, issuer, subject, email)
+			VALUES ($1, $2, $3, $4)
+		`, userID, issuer, subject, email); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return userID, nil
+}
+
+// orgNeedsOIDCBootstrap is true when the org has no admin/owner bound to a
+// non-dev external identity yet (first real IdP login seeds convention admin).
+func (r *Resolver) orgNeedsOIDCBootstrap(ctx context.Context, orgID uuid.UUID) (bool, error) {
+	var n int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		  FROM organization_memberships om
+		  JOIN external_identities ei ON ei.user_id = om.user_id
+		 WHERE om.organization_id = $1
+		   AND om.role IN ('admin', 'owner')
+		   AND ei.issuer <> 'dev:'
+	`, orgID).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n == 0, nil
+}
+
+func (r *Resolver) loadMemberships(ctx context.Context, userID uuid.UUID) ([]Membership, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT organization_id, role
+		  FROM organization_memberships
+		 WHERE user_id = $1
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]Membership, 0)
+	for rows.Next() {
+		var m Membership
+		if err := rows.Scan(&m.OrganizationID, &m.Role); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// WithTx is re-exported here so the resolver doesn't have to import the db
+// package (which would cause a cycle in some test setups).
+func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) error {
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}

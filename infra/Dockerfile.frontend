@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1.7
+
+# -----------------------------------------------------------------------------
+# Den frontend image. Rsbuild builds a static SPA bundle; nginx serves it
+# and reverse-proxies /api/ to the backend. The VITE_* ARGs below are
+# compile-time: rsbuild inlines them via `define` in rsbuild.config.ts.
+# -----------------------------------------------------------------------------
+FROM node:22-alpine AS build
+WORKDIR /src
+
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --no-audit --no-fund
+
+COPY frontend/ ./
+
+# Compile-time switches. Defaults match the compose dev stack (dev header
+# auth, same-origin /api). For OIDC builds you MUST pass --build-arg to
+# bake the authority / client-id into the bundle.
+ARG VITE_AUTH_MODE=dev
+ARG VITE_OIDC_AUTHORITY=
+ARG VITE_OIDC_CLIENT_ID=
+ARG VITE_OIDC_SCOPE=openid profile email
+ARG VITE_API_BASE_URL=
+ARG DEN_VERSION=dev
+ENV VITE_AUTH_MODE=$VITE_AUTH_MODE \
+    VITE_OIDC_AUTHORITY=$VITE_OIDC_AUTHORITY \
+    VITE_OIDC_CLIENT_ID=$VITE_OIDC_CLIENT_ID \
+    VITE_OIDC_SCOPE=$VITE_OIDC_SCOPE \
+    VITE_API_BASE_URL=$VITE_API_BASE_URL \
+    DEN_VERSION=$DEN_VERSION
+
+# Fail fast if someone asks for oidc but forgets authority/client — otherwise
+# the bundle ships with "undefined" baked in and errors only at runtime.
+RUN if [ "$VITE_AUTH_MODE" = "oidc" ] && { [ -z "$VITE_OIDC_AUTHORITY" ] || [ -z "$VITE_OIDC_CLIENT_ID" ]; }; then \
+      echo "Dockerfile: VITE_AUTH_MODE=oidc requires non-empty VITE_OIDC_AUTHORITY and VITE_OIDC_CLIENT_ID (pass --build-arg)."; \
+      exit 1; \
+    fi
+
+RUN npm run build
+
+FROM nginx:1.27-alpine AS runtime
+COPY --from=build /src/dist /usr/share/nginx/html
+# docker-compose uses backend:8080; a future nginx.k8s.conf will swap in
+# the service name. Pin the config file in via build arg so the same image
+# can be reused by swapping the --build-arg.
+ARG NGINX_CONF=nginx.conf
+COPY infra/${NGINX_CONF} /etc/nginx/conf.d/default.conf
+EXPOSE 80

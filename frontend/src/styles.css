@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --den-primary: #e44763;
+  --den-primary-hover: #c93a53;
+  --den-accent: #f7d1d9;
+  --den-surface: #ffffff;
+  --den-foreground: #241e20;
+  --den-muted: #f7f4f5;
+  --den-border: #e7dcdf;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-den-muted text-den-foreground font-body antialiased;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  @apply font-heading;
+}
+
+a {
+  @apply text-den-primary hover:text-den-primary-hover;
+}
