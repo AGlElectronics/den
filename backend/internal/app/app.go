@@ -26,6 +26,7 @@ import (
 	"github.com/AGlElectronics/den/backend/internal/db"
 	"github.com/AGlElectronics/den/backend/internal/files"
 	httpx "github.com/AGlElectronics/den/backend/internal/http"
+	"github.com/AGlElectronics/den/backend/internal/keycloak"
 )
 
 // Version is set via -ldflags at build time; defaults to "dev" so a plain
@@ -78,12 +79,26 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 		logger.Info().Str("issuer", cfg.OIDCIssuerURL).Msg("oidc verifier ready")
 	}
 
+	kcSync := httpx.NewKeycloakSync(pool, filesClient, keycloak.Config{
+		BaseURL:      cfg.KeycloakAdminURL,
+		Realm:        cfg.KeycloakRealm,
+		ClientID:     cfg.KeycloakClientID,
+		ClientSecret: cfg.KeycloakClientSecret,
+	}, cfg.AppBaseURL, logger)
+	if kcSync.Status().Enabled {
+		logger.Info().Str("realm", cfg.KeycloakRealm).Msg("keycloak login branding sync enabled")
+	}
+	syncCtx, stopSync := context.WithCancel(ctx)
+	defer stopSync()
+	go kcSync.Run(syncCtx)
+
 	router := httpx.NewRouter(httpx.Deps{
 		Config:       cfg,
 		Pool:         pool,
 		Logger:       logger,
 		Files:        filesClient,
 		OIDCVerifier: oidcVerifier,
+		KeycloakSync: kcSync,
 	}, Version)
 
 	server := &nethttp.Server{

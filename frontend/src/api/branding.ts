@@ -47,6 +47,23 @@ export function deleteBrandingAsset(id: string): Promise<void> {
   return apiRequest<void>(`/api/v1/brand/assets/${id}`, { method: 'DELETE' });
 }
 
+/** Den pushes the brand into the Keycloak realm so the sign-in page matches. */
+export type KeycloakSyncStatus = {
+  enabled: boolean;
+  realm?: string;
+  revision?: number;
+  synced_at?: string;
+  last_error?: string;
+};
+
+export function getKeycloakSync(): Promise<KeycloakSyncStatus> {
+  return apiRequest<KeycloakSyncStatus>('/api/v1/keycloak-sync');
+}
+
+export function syncKeycloakNow(): Promise<KeycloakSyncStatus> {
+  return apiRequest<KeycloakSyncStatus>('/api/v1/keycloak-sync', { method: 'POST' });
+}
+
 /** Asset roles modules and the sign-in page understand; the newest upload per role wins. */
 export const ASSET_ROLES = [
   { role: 'logo', hint: 'Shown in module headers and on the sign-in page. SVG or PNG, transparent background.' },

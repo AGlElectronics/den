@@ -11,6 +11,7 @@ import {
   uploadBrandingAsset,
 } from '@/api/branding';
 import { fetchDashboard, type UsableModule } from '@/api/dashboard';
+import { KeycloakSyncCard } from '@/components/KeycloakSyncCard';
 import { PortalHome } from '@/components/PortalHome';
 import { useMe } from '@/hooks/useMe';
 import {
@@ -381,6 +382,8 @@ export function BrandingPage() {
           </table>
         </div>
       </section>
+
+      <KeycloakSyncCard />
     </div>
   );
 }

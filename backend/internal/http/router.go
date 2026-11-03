@@ -24,6 +24,8 @@
 //	DELETE /api/v1/brand/assets/{id}
 //	GET    /api/v1/org-settings
 //	PUT    /api/v1/org-settings
+//	GET    /api/v1/keycloak-sync                 — login branding push status
+//	POST   /api/v1/keycloak-sync                 — push branding to Keycloak now
 //
 //	Public:
 //	POST /api/v1/integrations/pairing/redeem?token=... — one-shot token → credential
@@ -52,6 +54,7 @@ import (
 	"github.com/AGlElectronics/den/backend/internal/auth"
 	"github.com/AGlElectronics/den/backend/internal/config"
 	"github.com/AGlElectronics/den/backend/internal/files"
+	"github.com/AGlElectronics/den/backend/internal/keycloak"
 )
 
 // Deps groups the runtime dependencies the HTTP layer needs. The server
@@ -63,6 +66,8 @@ type Deps struct {
 	Logger       zerolog.Logger
 	Files        *files.Client
 	OIDCVerifier *auth.OIDCVerifier
+	// KeycloakSync pushes branding into the realm; nil disables it.
+	KeycloakSync *KeycloakSync
 }
 
 // NewRouter wires the chi router with middleware, CORS and routes.
@@ -114,6 +119,12 @@ func NewRouter(deps Deps, version string) http.Handler {
 	brandH := newBrandingHandler(deps.Pool, deps.Files)
 	pairH := newPairingHandler(deps.Pool, deps.Config.AppBaseURL)
 	settingsH := &orgSettingsHandler{pool: deps.Pool}
+	kcSync := deps.KeycloakSync
+	if kcSync == nil {
+		kcSync = NewKeycloakSync(deps.Pool, deps.Files, keycloak.Config{}, "", deps.Logger)
+	}
+	brandH.onChange = kcSync.Trigger
+	settingsH.onChange = kcSync.Trigger
 
 	// Module bearer middleware: hashes the Authorization bearer, resolves
 	// to a module_credential row, and attaches a ModulePrincipal to the
@@ -163,6 +174,8 @@ func NewRouter(deps Deps, version string) http.Handler {
 					admin.Route("/brand", brandH.humanRoutes)
 					admin.Get("/org-settings", settingsH.get)
 					admin.Put("/org-settings", settingsH.put)
+					admin.Get("/keycloak-sync", kcSync.getStatus)
+					admin.Post("/keycloak-sync", kcSync.syncNow)
 				})
 			})
 		})

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -30,6 +31,8 @@ import (
 
 type orgSettingsHandler struct {
 	pool *pgxpool.Pool
+	// onChange runs after a successful update (e.g. to resync Keycloak).
+	onChange func()
 }
 
 type orgSettingsDTO struct {
@@ -44,7 +47,7 @@ var (
 	settingsTokens     = map[string]bool{"{first}": true, "{last}": true, "{nickname}": true}
 )
 
-func (h *orgSettingsHandler) load(r *http.Request, orgID uuid.UUID) (*orgSettingsDTO, error) {
+func (h *orgSettingsHandler) load(ctx context.Context, orgID uuid.UUID) (*orgSettingsDTO, error) {
 	if h.pool == nil {
 		return nil, httperror.Internal(errors.New("database not configured"))
 	}
@@ -52,7 +55,7 @@ func (h *orgSettingsHandler) load(r *http.Request, orgID uuid.UUID) (*orgSetting
 		raw     []byte
 		updated time.Time
 	)
-	err := h.pool.QueryRow(r.Context(),
+	err := h.pool.QueryRow(ctx,
 		`SELECT data, updated_at FROM organization_settings WHERE organization_id = $1`, orgID).Scan(&raw, &updated)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return &orgSettingsDTO{Data: map[string]any{}}, nil
@@ -70,7 +73,7 @@ func (h *orgSettingsHandler) load(r *http.Request, orgID uuid.UUID) (*orgSetting
 }
 
 func (h *orgSettingsHandler) get(w http.ResponseWriter, r *http.Request) {
-	s, err := h.load(r, defaultOrgID)
+	s, err := h.load(r.Context(), defaultOrgID)
 	if err != nil {
 		httperror.Render(w, r, err)
 		return
@@ -108,6 +111,9 @@ func (h *orgSettingsHandler) put(w http.ResponseWriter, r *http.Request) {
 	`, defaultOrgID, buf, actor); err != nil {
 		httperror.Render(w, r, httperror.Internal(err))
 		return
+	}
+	if h.onChange != nil {
+		h.onChange()
 	}
 	h.get(w, r)
 }
@@ -170,7 +176,7 @@ func (h *orgSettingsHandler) integrationGet(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	s, err := h.load(r, m.OrganizationID)
+	s, err := h.load(r.Context(), m.OrganizationID)
 	if err != nil {
 		httperror.Render(w, r, err)
 		return

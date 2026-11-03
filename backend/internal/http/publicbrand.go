@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -32,9 +33,9 @@ type brandBundle struct {
 	LogoURL string `json:"logo_url,omitempty"`
 }
 
-func (h *brandingHandler) bundle(r *http.Request, orgID uuid.UUID, settings map[string]any) (*brandBundle, error) {
+func (h *brandingHandler) bundle(ctx context.Context, orgID uuid.UUID, settings map[string]any) (*brandBundle, error) {
 	out := &brandBundle{Theme: json.RawMessage("{}"), Typography: json.RawMessage("{}"), Copy: json.RawMessage("{}"), Assets: map[string]string{}}
-	profile, err := h.loadLatestProfile(r, orgID)
+	profile, err := h.loadLatestProfile(ctx, orgID)
 	var he *httperror.Error
 	switch {
 	case err == nil:
@@ -45,7 +46,7 @@ func (h *brandingHandler) bundle(r *http.Request, orgID uuid.UUID, settings map[
 		return nil, err
 	}
 
-	rows, err := h.pool.Query(r.Context(), `
+	rows, err := h.pool.Query(ctx, `
 		SELECT DISTINCT ON (role) role, id FROM branding_assets
 		 WHERE organization_id = $1 ORDER BY role, created_at DESC`, orgID)
 	if err != nil {
@@ -73,7 +74,7 @@ func (h *brandingHandler) bundle(r *http.Request, orgID uuid.UUID, settings map[
 		_ = json.Unmarshal(out.Copy, &copyMap)
 		if name, _ := copyMap["convention_name"].(string); strings.TrimSpace(name) != "" {
 			out.OrganizationName = strings.TrimSpace(name)
-		} else if err := h.pool.QueryRow(r.Context(),
+		} else if err := h.pool.QueryRow(ctx,
 			`SELECT display_name FROM organizations WHERE id = $1`, orgID).Scan(&out.OrganizationName); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, httperror.Internal(err)
 		}
@@ -83,21 +84,13 @@ func (h *brandingHandler) bundle(r *http.Request, orgID uuid.UUID, settings map[
 
 func (h *brandingHandler) publicRoutes(settings *orgSettingsHandler) func(chi.Router) {
 	return func(r chi.Router) {
-		// Public and read-only, so any origin may read it (the Keycloak login
-		// page fetches it from its own origin).
-		r.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-				w.Header().Set("Access-Control-Allow-Origin", "*")
-				next.ServeHTTP(w, req)
-			})
-		})
 		r.Get("/brand", func(w http.ResponseWriter, req *http.Request) {
-			s, err := settings.load(req, defaultOrgID)
+			s, err := settings.load(req.Context(), defaultOrgID)
 			if err != nil {
 				httperror.Render(w, req, err)
 				return
 			}
-			b, err := h.bundle(req, defaultOrgID, s.Data)
+			b, err := h.bundle(req.Context(), defaultOrgID, s.Data)
 			if err != nil {
 				httperror.Render(w, req, err)
 				return
@@ -131,12 +124,12 @@ func (h *brandingHandler) integrationBundle(settings *orgSettingsHandler) http.H
 		if !ok {
 			return
 		}
-		s, err := settings.load(r, m.OrganizationID)
+		s, err := settings.load(r.Context(), m.OrganizationID)
 		if err != nil {
 			httperror.Render(w, r, err)
 			return
 		}
-		b, err := h.bundle(r, m.OrganizationID, s.Data)
+		b, err := h.bundle(r.Context(), m.OrganizationID, s.Data)
 		if err != nil {
 			httperror.Render(w, r, err)
 			return

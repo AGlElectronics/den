@@ -48,6 +48,13 @@ type Config struct {
 
 	CORSAllowedOrigins []string
 
+	// Keycloak admin access for pushing login branding into the realm.
+	// Disabled unless KEYCLOAK_ADMIN_URL and KEYCLOAK_CLIENT_SECRET are set.
+	KeycloakAdminURL     string
+	KeycloakRealm        string
+	KeycloakClientID     string
+	KeycloakClientSecret string
+
 	ShutdownTimeout time.Duration
 }
 
@@ -75,7 +82,12 @@ func Load() (*Config, error) {
 		AdminGroups:        splitCSV(getEnv("DEN_ADMIN_GROUPS", "den-admin")),
 		CORSAllowedOrigins: splitCSV(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3001")),
 		ShutdownTimeout:    getEnvDuration("SHUTDOWN_TIMEOUT", 15*time.Second),
+
+		KeycloakAdminURL:     getEnv("KEYCLOAK_ADMIN_URL", ""),
+		KeycloakClientID:     getEnv("KEYCLOAK_CLIENT_ID", "den-keycloak"),
+		KeycloakClientSecret: getEnv("KEYCLOAK_CLIENT_SECRET", ""),
 	}
+	cfg.KeycloakRealm = getEnv("KEYCLOAK_REALM", realmFromIssuer(cfg.OIDCIssuerURL))
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -166,6 +178,15 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return parsed
+}
+
+// realmFromIssuer extracts "conservices" from ".../realms/conservices".
+func realmFromIssuer(issuer string) string {
+	_, realm, ok := strings.Cut(strings.TrimRight(issuer, "/"), "/realms/")
+	if !ok {
+		return ""
+	}
+	return realm
 }
 
 func splitCSV(s string) []string {

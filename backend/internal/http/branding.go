@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +34,14 @@ import (
 type brandingHandler struct {
 	pool  *pgxpool.Pool
 	files *files.Client
+	// onChange runs after the profile or an asset changes (e.g. to resync Keycloak).
+	onChange func()
+}
+
+func (h *brandingHandler) changed() {
+	if h.onChange != nil {
+		h.onChange()
+	}
 }
 
 func newBrandingHandler(pool *pgxpool.Pool, filesClient *files.Client) *brandingHandler {
@@ -51,7 +60,7 @@ type brandingProfileDTO struct {
 	UpdatedAt  string          `json:"updated_at"`
 }
 
-func (h *brandingHandler) loadLatestProfile(r *http.Request, orgID uuid.UUID) (*brandingProfileDTO, error) {
+func (h *brandingHandler) loadLatestProfile(ctx context.Context, orgID uuid.UUID) (*brandingProfileDTO, error) {
 	if h.pool == nil {
 		return nil, httperror.Internal(errors.New("database not configured"))
 	}
@@ -62,7 +71,7 @@ func (h *brandingHandler) loadLatestProfile(r *http.Request, orgID uuid.UUID) (*
 		copyJSON   []byte
 		created    time.Time
 	)
-	err := h.pool.QueryRow(r.Context(), `
+	err := h.pool.QueryRow(ctx, `
 		SELECT revision, theme, typography, copy, created_at
 		  FROM branding_profiles
 		 WHERE organization_id = $1
@@ -205,7 +214,7 @@ func (h *brandingHandler) humanRoutes(r chi.Router) {
 }
 
 func (h *brandingHandler) humanGetProfile(w http.ResponseWriter, r *http.Request) {
-	profile, err := h.loadLatestProfile(r, defaultOrgID)
+	profile, err := h.loadLatestProfile(r.Context(), defaultOrgID)
 	if err != nil {
 		httperror.Render(w, r, err)
 		return
@@ -247,6 +256,7 @@ func (h *brandingHandler) humanPutProfile(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	h.changed()
 	writeJSON(w, http.StatusCreated, map[string]any{"revision": nextRevision})
 }
 
@@ -320,6 +330,7 @@ func (h *brandingHandler) humanUploadAsset(w http.ResponseWriter, r *http.Reques
 		httperror.Render(w, r, httperror.Internal(err))
 		return
 	}
+	h.changed()
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id.String()})
 }
 
@@ -352,6 +363,7 @@ func (h *brandingHandler) humanDeleteAsset(w http.ResponseWriter, r *http.Reques
 	if h.files != nil {
 		_ = h.files.Remove(r.Context(), key)
 	}
+	h.changed()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -370,7 +382,7 @@ func (h *brandingHandler) integrationGetProfile(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	profile, err := h.loadLatestProfile(r, m.OrganizationID)
+	profile, err := h.loadLatestProfile(r.Context(), m.OrganizationID)
 	if err != nil {
 		httperror.Render(w, r, err)
 		return
