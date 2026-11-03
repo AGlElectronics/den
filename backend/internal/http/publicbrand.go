@@ -83,6 +83,14 @@ func (h *brandingHandler) bundle(r *http.Request, orgID uuid.UUID, settings map[
 
 func (h *brandingHandler) publicRoutes(settings *orgSettingsHandler) func(chi.Router) {
 	return func(r chi.Router) {
+		// Public and read-only, so any origin may read it (the Keycloak login
+		// page fetches it from its own origin).
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+				next.ServeHTTP(w, req)
+			})
+		})
 		r.Get("/brand", func(w http.ResponseWriter, req *http.Request) {
 			s, err := settings.load(req, defaultOrgID)
 			if err != nil {
