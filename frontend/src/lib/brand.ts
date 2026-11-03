@@ -24,13 +24,13 @@ export type BrandField = {
  */
 export const BRAND_SCHEMA: Record<BrandSection, BrandField[]> = {
   theme: [
-    { key: 'primary', kind: 'color', cssVar: '--den-primary', fallback: '#e44763', affects: 'Buttons, links, active nav item, icons on service cards.' },
-    { key: 'primary_hover', kind: 'color', cssVar: '--den-primary-hover', fallback: '#c93a53', affects: 'Hover state of buttons and links.' },
-    { key: 'accent', kind: 'color', cssVar: '--den-accent', fallback: '#f7d1d9', affects: 'Hero gradient start, icon tiles, active nav background.' },
+    { key: 'primary', kind: 'color', cssVar: '--den-primary', fallback: '#5048e5', affects: 'Buttons, links, active nav item, icons on service cards.' },
+    { key: 'primary_hover', kind: 'color', cssVar: '--den-primary-hover', fallback: '#4338ca', affects: 'Hover state of buttons and links.' },
+    { key: 'accent', kind: 'color', cssVar: '--den-accent', fallback: '#e0e7ff', affects: 'Hero gradient start, icon tiles, active nav background.' },
     { key: 'background', kind: 'color', cssVar: '--den-surface', fallback: '#ffffff', affects: 'Cards, top bar and panels (the "surface").' },
-    { key: 'muted', kind: 'color', cssVar: '--den-muted', fallback: '#f7f4f5', affects: 'Page background behind the cards, hero gradient end.' },
-    { key: 'foreground', kind: 'color', cssVar: '--den-foreground', fallback: '#241e20', affects: 'Body text and headings.' },
-    { key: 'border', kind: 'color', cssVar: '--den-border', fallback: '#e7dcdf', affects: 'Card outlines and dividers.' },
+    { key: 'muted', kind: 'color', cssVar: '--den-muted', fallback: '#f5f5f7', affects: 'Page background behind the cards, hero gradient end.' },
+    { key: 'foreground', kind: 'color', cssVar: '--den-foreground', fallback: '#1c1b22', affects: 'Body text and headings.' },
+    { key: 'border', kind: 'color', cssVar: '--den-border', fallback: '#e4e4e7', affects: 'Card outlines and dividers.' },
   ],
   typography: [
     { key: 'heading_font', kind: 'font', cssVar: '--den-font-heading', fallback: 'Montserrat', affects: 'Convention name, section titles, card titles.' },
@@ -140,7 +140,7 @@ export function lintBrand(brand: BrandJSON): FieldIssue[] {
       }
       const field = BRAND_SCHEMA[section].find((f) => f.key === key)!;
       if (field.kind === 'color' && !isColor(value)) {
-        issues.push({ section, key, message: 'Expected a CSS colour like "#e44763".' });
+        issues.push({ section, key, message: 'Expected a CSS colour like "#5048e5".' });
       }
       if (field.kind !== 'color' && typeof value !== 'string') {
         issues.push({ section, key, message: 'Expected a string.' });

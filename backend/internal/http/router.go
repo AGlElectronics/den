@@ -22,14 +22,20 @@
 //	POST   /api/v1/brand/assets
 //	GET    /api/v1/brand/assets/{id}
 //	DELETE /api/v1/brand/assets/{id}
+//	GET    /api/v1/org-settings
+//	PUT    /api/v1/org-settings
 //
-//	Public (mated-module server-to-server; the module holds the credential itself):
+//	Public:
 //	POST /api/v1/integrations/pairing/redeem?token=... — one-shot token → credential
+//	GET  /api/v1/public/brand                         — brand bundle for login screens
+//	GET  /api/v1/public/brand/assets/{role}           — newest asset of a role (logo, …)
 //
 //	Module-bearer auth (Authorization: Bearer <module credential>):
 //	GET /api/v1/integrations/branding/profile
 //	GET /api/v1/integrations/branding/assets
 //	GET /api/v1/integrations/branding/assets/{id}
+//	GET /api/v1/integrations/settings
+//	GET /api/v1/integrations/bundle                   — brand + settings in one call
 package http
 
 import (
@@ -107,6 +113,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 	modH := newModuleHandler(deps.Pool)
 	brandH := newBrandingHandler(deps.Pool, deps.Files)
 	pairH := newPairingHandler(deps.Pool, deps.Config.AppBaseURL)
+	settingsH := &orgSettingsHandler{pool: deps.Pool}
 
 	// Module bearer middleware: hashes the Authorization bearer, resolves
 	// to a module_credential row, and attaches a ModulePrincipal to the
@@ -131,8 +138,13 @@ func NewRouter(deps Deps, version string) http.Handler {
 				integ.Group(func(bearer chi.Router) {
 					bearer.Use(moduleAuth)
 					bearer.Route("/branding", brandH.integrationRoutes)
+					bearer.Get("/settings", settingsH.integrationGet)
+					bearer.Get("/bundle", brandH.integrationBundle(settingsH))
 				})
 			})
+
+			// --- Public: login screens need the brand before sign-in ----
+			v1.Route("/public", brandH.publicRoutes(settingsH))
 
 			// --- Human UI (dev header or OIDC) --------------------------
 			v1.Group(func(secure chi.Router) {
@@ -149,6 +161,8 @@ func NewRouter(deps Deps, version string) http.Handler {
 						sub.Post("/{id}/pairing-tokens", pairH.mintToken)
 					})
 					admin.Route("/brand", brandH.humanRoutes)
+					admin.Get("/org-settings", settingsH.get)
+					admin.Put("/org-settings", settingsH.put)
 				})
 			})
 		})

@@ -11,13 +11,13 @@ export default {
     extend: {
       colors: {
         den: {
-          primary: brand('den-primary', '#e44763'),
-          'primary-hover': brand('den-primary-hover', '#c93a53'),
-          accent: brand('den-accent', '#f7d1d9'),
+          primary: brand('den-primary', '#5048e5'),
+          'primary-hover': brand('den-primary-hover', '#4338ca'),
+          accent: brand('den-accent', '#e0e7ff'),
           surface: brand('den-surface', '#ffffff'),
-          foreground: brand('den-foreground', '#241e20'),
-          muted: brand('den-muted', '#f7f4f5'),
-          border: brand('den-border', '#e7dcdf'),
+          foreground: brand('den-foreground', '#1c1b22'),
+          muted: brand('den-muted', '#f5f5f7'),
+          border: brand('den-border', '#e4e4e7'),
         },
       },
       fontFamily: {

@@ -1,6 +1,6 @@
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Boxes, Gauge, LogOut, Palette, Settings, Shield } from 'lucide-react';
+import { ArrowLeft, Boxes, Building2, Gauge, LogOut, Palette, Settings, Shield } from 'lucide-react';
 
 import { fetchDashboard } from '@/api/dashboard';
 import { useMe } from '@/hooks/useMe';
@@ -12,6 +12,7 @@ const NAV = [
   { to: '/admin', label: 'Overview', icon: Gauge, exact: true },
   { to: '/admin/modules', label: 'Modules', icon: Boxes },
   { to: '/admin/branding', label: 'Branding', icon: Palette },
+  { to: '/admin/organization', label: 'Organisation', icon: Building2 },
   { to: '/admin/settings', label: 'Settings', icon: Settings },
 ] as const;
 

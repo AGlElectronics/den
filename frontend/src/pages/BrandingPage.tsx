@@ -2,7 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Plus, RotateCcw } from 'lucide-react';
 
-import { getBrandingProfile, listBrandingAssets, putBrandingProfile } from '@/api/branding';
+import {
+  ASSET_ROLES,
+  deleteBrandingAsset,
+  getBrandingProfile,
+  listBrandingAssets,
+  putBrandingProfile,
+  uploadBrandingAsset,
+} from '@/api/branding';
 import { fetchDashboard, type UsableModule } from '@/api/dashboard';
 import { PortalHome } from '@/components/PortalHome';
 import { useMe } from '@/hooks/useMe';
@@ -89,6 +96,15 @@ export function BrandingPage() {
       void qc.invalidateQueries({ queryKey: ['brand', 'profile'] });
       void qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
+  });
+
+  const upload = useMutation({
+    mutationFn: ({ role, file }: { role: string; file: File }) => uploadBrandingAsset(role, file),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['brand', 'assets'] }),
+  });
+  const remove = useMutation({
+    mutationFn: deleteBrandingAsset,
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['brand', 'assets'] }),
   });
 
   const setKey = (section: BrandSection, key: string, value: string) => {
@@ -293,9 +309,48 @@ export function BrandingPage() {
       <section>
         <h2 className="text-lg font-heading font-bold">Assets</h2>
         <p className="text-sm text-den-foreground/70">
-          Logos, favicons and share images. Paired modules fetch them through Den&apos;s integration API — no module
-          ever gets storage credentials.
+          Logos and favicons. Paired modules and the sign-in page fetch them through Den — no module ever gets
+          storage credentials. The newest upload per role is used.
         </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {ASSET_ROLES.map(({ role, hint }) => {
+            const current = assets.data?.find((a) => a.role === role);
+            return (
+              <div key={role} className="flex items-center gap-3 rounded-lg border border-den-border bg-den-surface p-3">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md border border-den-border bg-den-muted">
+                  {current ? (
+                    <img src={`/api/v1/public/brand/assets/${role}?v=${current.id}`} alt={role} className="max-h-full max-w-full object-contain" />
+                  ) : (
+                    <span className="text-[10px] text-den-foreground/40">none</span>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1 text-sm">
+                  <p className="font-mono font-semibold">{role}</p>
+                  <p className="text-xs text-den-foreground/60">{hint}</p>
+                  <div className="mt-1 flex gap-3 text-xs">
+                    <label className="cursor-pointer text-den-primary hover:underline">
+                      {upload.isPending && upload.variables?.role === role ? 'Uploading…' : current ? 'Replace' : 'Upload'}
+                      <input type="file" accept="image/*" className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) upload.mutate({ role, file });
+                          e.target.value = '';
+                        }} />
+                    </label>
+                    {current && (
+                      <button type="button" className="text-red-700 hover:underline" onClick={() => remove.mutate(current.id)}>
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {(upload.error || remove.error) && (
+          <p className="mt-2 text-sm text-red-700">{((upload.error ?? remove.error) as Error).message}</p>
+        )}
         <div className="mt-3 overflow-hidden rounded-lg border border-den-border bg-den-surface">
           <table className="w-full text-sm">
             <thead className="bg-den-muted text-left text-xs uppercase tracking-wide text-den-foreground/60">

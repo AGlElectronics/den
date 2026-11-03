@@ -13,6 +13,7 @@ import { DashboardPage } from '@/pages/DashboardPage';
 import { OrganizePage } from '@/pages/OrganizePage';
 import { ModulesPage } from '@/pages/ModulesPage';
 import { BrandingPage } from '@/pages/BrandingPage';
+import { OrgSettingsPage } from '@/pages/OrgSettingsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { OidcCallbackPage } from '@/pages/OidcCallbackPage';
@@ -145,6 +146,12 @@ const adminBrandingRoute = createRoute({
   component: BrandingPage,
 });
 
+const adminOrgSettingsRoute = createRoute({
+  getParentRoute: () => adminLayoutRoute,
+  path: '/admin/organization',
+  component: OrgSettingsPage,
+});
+
 const adminSettingsRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/admin/settings',
@@ -159,6 +166,7 @@ const routeTree = rootRoute.addChildren([
     adminOverviewRoute,
     adminModulesRoute,
     adminBrandingRoute,
+    adminOrgSettingsRoute,
     adminSettingsRoute,
   ]),
 ]);

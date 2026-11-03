@@ -4,13 +4,13 @@
 
 :root {
   color-scheme: light;
-  --den-primary: #e44763;
-  --den-primary-hover: #c93a53;
-  --den-accent: #f7d1d9;
+  --den-primary: #5048e5;
+  --den-primary-hover: #4338ca;
+  --den-accent: #e0e7ff;
   --den-surface: #ffffff;
-  --den-foreground: #241e20;
-  --den-muted: #f7f4f5;
-  --den-border: #e7dcdf;
+  --den-foreground: #1c1b22;
+  --den-muted: #f5f5f7;
+  --den-border: #e4e4e7;
 }
 
 html,

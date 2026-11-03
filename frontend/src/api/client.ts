@@ -56,16 +56,17 @@ export async function apiRequest<T>(path: string, opts: RequestOpts = {}): Promi
   }
 
   const auth = await authHeadersResolver();
+  const isForm = opts.body instanceof FormData;
   const headers: Record<string, string> = {
     Accept: 'application/json',
-    ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+    ...(opts.body !== undefined && !isForm ? { 'Content-Type': 'application/json' } : {}),
     ...auth,
     ...(opts.headers ?? {}),
   };
 
   const res = await fetch(url.toString(), {
     method: opts.method ?? 'GET',
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    body: isForm ? (opts.body as FormData) : opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     signal: opts.signal,
     headers,
     credentials: 'include',

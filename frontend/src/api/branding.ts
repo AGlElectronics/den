@@ -35,3 +35,20 @@ export function putBrandingProfile(
 export function listBrandingAssets(): Promise<BrandingAsset[]> {
   return apiRequest<BrandingAsset[]>('/api/v1/brand/assets');
 }
+
+export function uploadBrandingAsset(role: string, file: File): Promise<{ id: string }> {
+  const form = new FormData();
+  form.set('role', role);
+  form.set('file', file);
+  return apiRequest<{ id: string }>('/api/v1/brand/assets', { method: 'POST', body: form });
+}
+
+export function deleteBrandingAsset(id: string): Promise<void> {
+  return apiRequest<void>(`/api/v1/brand/assets/${id}`, { method: 'DELETE' });
+}
+
+/** Asset roles modules and the sign-in page understand; the newest upload per role wins. */
+export const ASSET_ROLES = [
+  { role: 'logo', hint: 'Shown in module headers and on the sign-in page. SVG or PNG, transparent background.' },
+  { role: 'favicon', hint: 'Browser tab icon. Square PNG or SVG.' },
+] as const;
