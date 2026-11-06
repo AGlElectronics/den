@@ -1,8 +1,13 @@
 import { Link } from '@tanstack/react-router';
 import {
   ArrowUpRight,
+  BookOpen,
   CalendarRange,
   ExternalLink,
+  GraduationCap,
+  Landmark,
+  LifeBuoy,
+  ListChecks,
   Package,
   Shield,
   UsersRound,
@@ -10,6 +15,7 @@ import {
 } from 'lucide-react';
 
 import type { UsableModule } from '@/api/dashboard';
+import { PortalTodos } from '@/components/PortalTodos';
 import { cn } from '@/lib/cn';
 
 function moduleIcon(slug: string) {
@@ -21,6 +27,17 @@ function moduleIcon(slug: string) {
       return CalendarRange;
     case 'hr':
       return UsersRound;
+    case 'finance':
+      return Landmark;
+    case 'learn':
+      return GraduationCap;
+    case 'desk':
+    case 'helpdesk':
+      return LifeBuoy;
+    case 'tasks':
+      return ListChecks;
+    case 'wiki':
+      return BookOpen;
     default:
       return Package;
   }
@@ -35,6 +52,17 @@ function moduleBlurb(slug: string): string {
       return 'Call for papers, programme, and editions';
     case 'hr':
       return 'Crew onboarding and role provisioning';
+    case 'finance':
+      return 'Invoices, payments, and money tracking';
+    case 'learn':
+      return 'Courses, enrolment, and training progress';
+    case 'desk':
+    case 'helpdesk':
+      return 'Answer attendee and crew emails as a team';
+    case 'tasks':
+      return 'Plan projects and track who is doing what';
+    case 'wiki':
+      return 'Pages, team spaces and shared knowledge';
     default:
       return 'Open this service';
   }
@@ -121,12 +149,14 @@ export function PortalHome({
         </div>
       </section>
 
+      {!preview && !loading && modules.length > 0 ? <PortalTodos modules={modules} /> : null}
+
       <section className="mt-8">
         <h2 className="font-heading text-xl font-bold">Your services</h2>
         <p className="mt-1 text-sm text-den-foreground/60">Everything your team uses, in one place.</p>
 
         {error && (
-          <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <div className="mt-4 rounded-md border border-den-danger-border bg-den-danger-bg p-3 text-sm text-den-danger">
             Failed to load your services.
           </div>
         )}

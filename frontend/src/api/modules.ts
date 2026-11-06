@@ -13,6 +13,8 @@ export type Module = {
   last_seen_at?: string;
   created_at: string;
   updated_at: string;
+  /** Database on the shared server (by name; it may not exist). */
+  database: string;
 };
 
 export type CreateModuleInput = {
@@ -20,6 +22,20 @@ export type CreateModuleInput = {
   display_name: string;
   base_url?: string;
   environment?: string;
+  create_database?: boolean;
+};
+
+export type CreatedDatabase = {
+  name: string;
+  username: string;
+  password: string;
+  database_url: string;
+};
+
+export type RemoveModuleResult = {
+  database_dropped: boolean;
+  database?: string;
+  backup_key?: string;
 };
 
 export type PairingToken = {
@@ -34,15 +50,19 @@ export function listModules(): Promise<Module[]> {
   return apiRequest<Module[]>('/api/v1/modules');
 }
 
-export function createModule(input: CreateModuleInput): Promise<{ id: string }> {
-  return apiRequest<{ id: string }>('/api/v1/modules', {
+export function createModule(input: CreateModuleInput): Promise<{ id: string; database?: CreatedDatabase }> {
+  return apiRequest('/api/v1/modules', {
     method: 'POST',
     body: input,
   });
 }
 
-export function deleteModule(id: string): Promise<void> {
-  return apiRequest<void>(`/api/v1/modules/${id}`, { method: 'DELETE' });
+/** Unlinks a module; with dropDatabase its database is backed up and deleted. */
+export function deleteModule(id: string, drop?: { confirm: string }): Promise<RemoveModuleResult> {
+  return apiRequest<RemoveModuleResult>(`/api/v1/modules/${id}`, {
+    method: 'DELETE',
+    query: drop ? { database: 'drop', confirm: drop.confirm } : undefined,
+  });
 }
 
 export function mintPairingToken(moduleId: string): Promise<PairingToken> {

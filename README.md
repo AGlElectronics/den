@@ -119,6 +119,16 @@ relying parties. See [docs/adr/0001-idp-first-ecosystem.md](docs/adr/0001-idp-fi
 
 See [docs/adr/0002-pairing-url-and-token.md](docs/adr/0002-pairing-url-and-token.md).
 
+## Operator: module databases and backups
+
+`cmd/operator` builds `den-operator`, an internal service and the only
+component with the Postgres admin login. Den's backend calls it
+(`OPERATOR_URL`, `OPERATOR_TOKEN`) to create and drop module databases and
+to run the nightly encrypted backup of the whole suite. Admins use it through
+Den admin → Modules and Backups. How it works, what is covered, the
+encryption key and the restore procedure:
+[docs/operations.md](../docs/operations.md).
+
 ## Repository layout
 
 ```text
@@ -135,6 +145,7 @@ den/
   backend/
     cmd/server/      # API server; never runs migrations
     cmd/migrate/     # one-shot migration binary (used by Compose + K8s Job)
+    cmd/operator/    # internal service: module databases + encrypted backups
     internal/
       app/           # server bootstrap (config, db, files, http)
       auth/          # dev header + stub OIDC middleware, user context

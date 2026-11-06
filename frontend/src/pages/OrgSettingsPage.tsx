@@ -36,7 +36,7 @@ export function OrgSettingsPage() {
   const fieldErrors =
     save.error instanceof ApiError ? ((save.error.details as Record<string, string> | undefined) ?? {}) : {};
 
-  const setKey = (key: string, value: string) => {
+  const setKey = (key: string, value: unknown) => {
     if (!parsed.value) return;
     setText(pretty({ ...parsed.value, [key]: value }));
   };
@@ -60,31 +60,31 @@ export function OrgSettingsPage() {
             <RotateCcw size={14} /> Reset
           </button>
           <button type="button" disabled={!dirty || !!parsed.error || save.isPending} onClick={() => save.mutate()}
-            className="rounded-md bg-den-primary px-3 py-2 text-sm font-medium text-white hover:bg-den-primary-hover disabled:opacity-40">
+            className="rounded-md bg-den-primary px-3 py-2 text-sm font-medium text-den-on-primary hover:bg-den-primary-hover disabled:opacity-40">
             {save.isPending ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>
       {save.isError && Object.keys(fieldErrors).length === 0 && (
-        <p className="text-sm text-red-700">{(save.error as Error).message}</p>
+        <p className="text-sm text-den-danger">{(save.error as Error).message}</p>
       )}
 
       <div className="grid overflow-hidden rounded-xl border border-den-border bg-den-surface lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <div className="border-b border-den-border p-4 lg:border-b-0 lg:border-r">
           <textarea spellCheck={false} value={text} onChange={(e) => setText(e.target.value)}
             className={cn(
-              'h-72 w-full rounded-md border bg-slate-50 px-3 py-2 font-mono text-xs leading-relaxed text-slate-900',
-              parsed.error ? 'border-red-400' : 'border-den-border',
+              'h-72 w-full rounded-md border bg-den-field px-3 py-2 font-mono text-xs leading-relaxed text-den-foreground',
+              parsed.error ? 'border-den-danger' : 'border-den-border',
             )} />
           <div className="mt-2 text-xs">
             {parsed.error ? (
-              <span className="inline-flex items-center gap-1 text-red-700"><AlertTriangle size={12} /> Invalid JSON: {parsed.error}</span>
+              <span className="inline-flex items-center gap-1 text-den-danger"><AlertTriangle size={12} /> Invalid JSON: {parsed.error}</span>
             ) : (
-              <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 size={12} /> Valid JSON</span>
+              <span className="inline-flex items-center gap-1 text-den-success"><CheckCircle2 size={12} /> Valid JSON</span>
             )}
           </div>
           {Object.keys(fieldErrors).length > 0 && (
-            <ul className="mt-2 space-y-1 text-xs text-red-700">
+            <ul className="mt-2 space-y-1 text-xs text-den-danger">
               {Object.entries(fieldErrors).map(([k, m]) => (
                 <li key={k}><code className="font-mono">{k}</code>: {m}</li>
               ))}

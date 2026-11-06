@@ -69,3 +69,19 @@ export const ASSET_ROLES = [
   { role: 'logo', hint: 'Shown in module headers and on the sign-in page. SVG or PNG, transparent background.' },
   { role: 'favicon', hint: 'Browser tab icon. Square PNG or SVG.' },
 ] as const;
+
+/** Picture behind every sign-in screen; layout and caption live in copy. */
+export const LOGIN_BACKGROUND_ROLE = 'login-background';
+
+export type LoginLayout = 'panel' | 'centered';
+
+/** Public brand bundle (no sign-in needed), used by the login page. */
+export type PublicBrand = {
+  organization_name: string;
+  copy: Record<string, unknown>;
+  login_background_url?: string;
+};
+
+export function getPublicBrand(): Promise<PublicBrand> {
+  return apiRequest<PublicBrand>('/api/v1/public/brand');
+}

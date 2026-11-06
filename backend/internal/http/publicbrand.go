@@ -29,9 +29,15 @@ type brandBundle struct {
 	Copy             json.RawMessage `json:"copy"`
 	// Assets maps a role ("logo", "favicon", …) to the newest asset id.
 	Assets map[string]string `json:"assets"`
-	// LogoURL is relative to Den (public endpoint).
-	LogoURL string `json:"logo_url,omitempty"`
+	// LogoURL and LoginBackgroundURL are relative to Den (public endpoint).
+	LogoURL            string `json:"logo_url,omitempty"`
+	LoginBackgroundURL string `json:"login_background_url,omitempty"`
 }
+
+// assetLoginBackground is the picture behind every sign-in screen. Its
+// layout and caption are copy.login_layout ("panel" | "centered") and
+// copy.login_caption.
+const assetLoginBackground = "login-background"
 
 func (h *brandingHandler) bundle(ctx context.Context, orgID uuid.UUID, settings map[string]any) (*brandBundle, error) {
 	out := &brandBundle{Theme: json.RawMessage("{}"), Typography: json.RawMessage("{}"), Copy: json.RawMessage("{}"), Assets: map[string]string{}}
@@ -65,6 +71,9 @@ func (h *brandingHandler) bundle(ctx context.Context, orgID uuid.UUID, settings 
 	}
 	if _, ok := out.Assets["logo"]; ok {
 		out.LogoURL = "/api/v1/public/brand/assets/logo"
+	}
+	if id, ok := out.Assets[assetLoginBackground]; ok {
+		out.LoginBackgroundURL = "/api/v1/public/brand/assets/" + assetLoginBackground + "?v=" + id
 	}
 
 	if name, _ := settings["organization_name"].(string); strings.TrimSpace(name) != "" {
@@ -134,7 +143,7 @@ func (h *brandingHandler) integrationBundle(settings *orgSettingsHandler) http.H
 			httperror.Render(w, r, err)
 			return
 		}
-		b.LogoURL = ""
+		b.LogoURL, b.LoginBackgroundURL = "", ""
 		writeJSON(w, http.StatusOK, map[string]any{"brand": b, "settings": s})
 	}
 }

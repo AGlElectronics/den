@@ -1,9 +1,11 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -23,10 +25,20 @@ var defaultOrgID = uuid.MustParse("00000000-0000-0000-0000-00000000d001")
 
 type moduleHandler struct {
 	pool *pgxpool.Pool
+	ops  *opsClient // nil: Den doesn't manage databases
 }
 
-func newModuleHandler(pool *pgxpool.Pool) *moduleHandler {
-	return &moduleHandler{pool: pool}
+func newModuleHandler(pool *pgxpool.Pool, ops *opsClient) *moduleHandler {
+	return &moduleHandler{pool: pool, ops: ops}
+}
+
+// moduleDatabase is the database a module uses on the shared server: the
+// one recorded when Den created it, else one named after the slug.
+func moduleDatabase(slug string, recorded *string) string {
+	if recorded != nil && *recorded != "" {
+		return *recorded
+	}
+	return strings.ReplaceAll(slug, "-", "_")
 }
 
 type moduleDTO struct {
@@ -42,6 +54,7 @@ type moduleDTO struct {
 	LastSeenAt     string          `json:"last_seen_at,omitempty"`
 	CreatedAt      string          `json:"created_at"`
 	UpdatedAt      string          `json:"updated_at"`
+	Database       string          `json:"database"`
 }
 
 func (h *moduleHandler) routes(r chi.Router) {
@@ -59,7 +72,7 @@ func (h *moduleHandler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.pool.Query(r.Context(), `
 		SELECT id, organization_id, slug, display_name, base_url, environment,
-		       enabled, status, manifest, last_seen_at, created_at, updated_at
+		       enabled, status, manifest, last_seen_at, created_at, updated_at, database_name
 		  FROM modules
 		 WHERE organization_id = $1
 		 ORDER BY display_name
@@ -79,12 +92,14 @@ func (h *moduleHandler) list(w http.ResponseWriter, r *http.Request) {
 			lastSeen   *time.Time
 			created    time.Time
 			updated    time.Time
+			dbName     *string
 		)
 		if err := rows.Scan(&id, &orgID, &dto.Slug, &dto.DisplayName, &dto.BaseURL,
-			&dto.Environment, &dto.Enabled, &dto.Status, &manifest, &lastSeen, &created, &updated); err != nil {
+			&dto.Environment, &dto.Enabled, &dto.Status, &manifest, &lastSeen, &created, &updated, &dbName); err != nil {
 			httperror.Render(w, r, httperror.Internal(err))
 			return
 		}
+		dto.Database = moduleDatabase(dto.Slug, dbName)
 		dto.ID = id.String()
 		dto.OrganizationID = orgID.String()
 		if len(manifest) == 0 {
@@ -106,6 +121,16 @@ type createModuleInput struct {
 	DisplayName string `json:"display_name"`
 	BaseURL     string `json:"base_url"`
 	Environment string `json:"environment"`
+	// CreateDatabase asks the operator for a database and login; the
+	// password is returned once.
+	CreateDatabase bool `json:"create_database"`
+}
+
+type createdDatabase struct {
+	Name        string `json:"name"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	DatabaseURL string `json:"database_url"`
 }
 
 func (h *moduleHandler) create(w http.ResponseWriter, r *http.Request) {
@@ -127,24 +152,51 @@ func (h *moduleHandler) create(w http.ResponseWriter, r *http.Request) {
 		httperror.Render(w, r, httperror.Internal(errors.New("database not configured")))
 		return
 	}
+	if in.CreateDatabase && h.ops == nil {
+		httperror.Render(w, r, httperror.Conflict("Den doesn't manage databases in this installation"))
+		return
+	}
 
 	var id uuid.UUID
+	var dbName *string
+	if in.CreateDatabase {
+		n := moduleDatabase(in.Slug, nil)
+		dbName = &n
+	}
 	err := h.pool.QueryRow(r.Context(), `
-		INSERT INTO modules (organization_id, slug, display_name, base_url, environment)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO modules (organization_id, slug, display_name, base_url, environment, database_name)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id
-	`, defaultOrgID, in.Slug, in.DisplayName, in.BaseURL, in.Environment).Scan(&id)
+	`, defaultOrgID, in.Slug, in.DisplayName, in.BaseURL, in.Environment, dbName).Scan(&id)
 	if err != nil {
 		httperror.Render(w, r, httperror.Internal(err))
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"id": id.String()})
+
+	out := map[string]any{"id": id.String()}
+	if in.CreateDatabase {
+		var db createdDatabase
+		if err := h.ops.do(r.Context(), http.MethodPost, "/v1/databases", map[string]string{"name": *dbName}, &db); err != nil {
+			_, _ = h.pool.Exec(r.Context(), `DELETE FROM modules WHERE id = $1`, id)
+			renderOps(w, r, err)
+			return
+		}
+		out["database"] = db
+	}
+	writeJSON(w, http.StatusCreated, out)
 
 	// best-effort audit; swallow error so a broken audit path can't fail the create
 	_, _ = h.pool.Exec(r.Context(), `
 		INSERT INTO audit_events (organization_id, actor_user_id, action, entity_type, entity_id, note)
-		VALUES ($1, $2, 'module.create', 'module', $3, '')
-	`, defaultOrgID, auth.ActorID(r.Context()), id)
+		VALUES ($1, $2, 'module.create', 'module', $3, $4)
+	`, defaultOrgID, auth.ActorID(r.Context()), id, auditNote(dbName, "database created: "))
+}
+
+func auditNote(db *string, prefix string) string {
+	if db == nil {
+		return ""
+	}
+	return prefix + *db
 }
 
 func (h *moduleHandler) get(w http.ResponseWriter, r *http.Request) {
@@ -166,14 +218,15 @@ func (h *moduleHandler) get(w http.ResponseWriter, r *http.Request) {
 		lastSeen *time.Time
 		created  time.Time
 		updated  time.Time
+		dbName   *string
 	)
 	err = h.pool.QueryRow(r.Context(), `
 		SELECT id, organization_id, slug, display_name, base_url, environment,
-		       enabled, status, manifest, last_seen_at, created_at, updated_at
+		       enabled, status, manifest, last_seen_at, created_at, updated_at, database_name
 		  FROM modules
 		 WHERE id = $1
 	`, id).Scan(&modID, &orgID, &dto.Slug, &dto.DisplayName, &dto.BaseURL,
-		&dto.Environment, &dto.Enabled, &dto.Status, &manifest, &lastSeen, &created, &updated)
+		&dto.Environment, &dto.Enabled, &dto.Status, &manifest, &lastSeen, &created, &updated, &dbName)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httperror.Render(w, r, httperror.NotFound("module"))
@@ -184,6 +237,7 @@ func (h *moduleHandler) get(w http.ResponseWriter, r *http.Request) {
 	}
 	dto.ID = modID.String()
 	dto.OrganizationID = orgID.String()
+	dto.Database = moduleDatabase(dto.Slug, dbName)
 	if len(manifest) == 0 {
 		manifest = []byte("{}")
 	}
@@ -248,14 +302,54 @@ func (h *moduleHandler) delete(w http.ResponseWriter, r *http.Request) {
 		httperror.Render(w, r, httperror.Internal(errors.New("database not configured")))
 		return
 	}
-	tag, err := h.pool.Exec(r.Context(), `DELETE FROM modules WHERE id = $1`, id)
+	var slug string
+	var recorded *string
+	err = h.pool.QueryRow(r.Context(), `SELECT slug, database_name FROM modules WHERE id = $1`, id).Scan(&slug, &recorded)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httperror.Render(w, r, httperror.NotFound("module"))
+		return
+	}
 	if err != nil {
 		httperror.Render(w, r, httperror.Internal(err))
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		httperror.Render(w, r, httperror.NotFound("module"))
+
+	// ?database=drop&confirm=<slug> deletes the module's data (the operator
+	// backs it up first and disconnects every session); anything else only
+	// unlinks it and keeps the data.
+	out := map[string]any{"database_dropped": false}
+	note := "data kept"
+	if r.URL.Query().Get("database") == "drop" {
+		if h.ops == nil {
+			httperror.Render(w, r, httperror.Conflict("Den doesn't manage databases in this installation"))
+			return
+		}
+		if r.URL.Query().Get("confirm") != slug {
+			httperror.Render(w, r, httperror.Validation("type the module's slug to confirm deleting its data", nil))
+			return
+		}
+		name := moduleDatabase(slug, recorded)
+		var res struct {
+			BackupKey string `json:"backup_key"`
+		}
+		if err := h.ops.do(context.WithoutCancel(r.Context()), http.MethodDelete, "/v1/databases/"+url.PathEscape(name), nil, &res); err != nil {
+			renderOps(w, r, err)
+			return
+		}
+		out["database_dropped"], out["database"], out["backup_key"] = true, name, res.BackupKey
+		note = "database dropped: " + name
+		if res.BackupKey != "" {
+			note += ", backup " + res.BackupKey
+		}
+	}
+
+	if _, err := h.pool.Exec(r.Context(), `DELETE FROM modules WHERE id = $1`, id); err != nil {
+		httperror.Render(w, r, httperror.Internal(err))
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	_, _ = h.pool.Exec(r.Context(), `
+		INSERT INTO audit_events (organization_id, actor_user_id, action, entity_type, entity_id, note)
+		VALUES ($1, $2, 'module.delete', 'module', $3, $4)
+	`, defaultOrgID, auth.ActorID(r.Context()), id, note)
+	writeJSON(w, http.StatusOK, out)
 }

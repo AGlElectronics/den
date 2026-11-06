@@ -43,13 +43,39 @@ export function getUserManager(): UserManager | null {
   return manager;
 }
 
+/**
+ * The Bearer token Den sends to its own API, or null when signed out / not in
+ * OIDC mode. Den's backend verifies via go-oidc's IDTokenVerifier (same as
+ * Stash), so prefer the ID token: its `aud` is this client, whereas Keycloak
+ * access tokens often carry a different `aud`. Paired modules get the same token.
+ */
+export async function getOidcBearer(): Promise<string | null> {
+  if (!isOidcAuthMode()) return null;
+  const mgr = getUserManager();
+  if (!mgr) return null;
+  const user = await mgr.getUser();
+  if (!user || user.expired) return null;
+  return user.id_token ?? user.access_token ?? null;
+}
+
 export async function signInWithOidc(returnPath: string): Promise<void> {
   const mgr = getUserManager();
   if (!mgr) {
     throw new Error('OIDC is not configured (set VITE_OIDC_AUTHORITY and VITE_OIDC_CLIENT_ID).');
   }
   const safePath = returnPath.startsWith('/') ? returnPath : '/dashboard';
-  await mgr.signinRedirect({ state: safePath });
+  try {
+    await mgr.signinRedirect({ state: safePath });
+  } catch (err) {
+    // fetch() rejects with a bare TypeError ("Failed to fetch") when the login
+    // server is down or its certificate isn't trusted.
+    if (err instanceof TypeError) {
+      throw new Error(
+        `Can't reach the login server (${new URL(mgr.settings.authority).host}). It may be down or its certificate may have expired.`,
+      );
+    }
+    throw err;
+  }
 }
 
 export async function signOutOidc(): Promise<void> {

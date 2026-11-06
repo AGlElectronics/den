@@ -21,6 +21,7 @@ const (
 	CodeNotFound     Code = "not_found"
 	CodeConflict     Code = "conflict"
 	CodeInternal     Code = "internal"
+	CodeUnavailable  Code = "unavailable"
 )
 
 // Error is the canonical service error type.
@@ -71,6 +72,9 @@ func Forbidden(msg string) *Error        { return New(CodeForbidden, msg) }
 func Validation(msg string, d any) *Error {
 	return New(CodeValidation, msg).WithDetails(d)
 }
+// Unavailable is a dependency (e.g. the operator) failing; msg is shown.
+func Unavailable(msg string) *Error { return New(CodeUnavailable, msg) }
+
 func Internal(cause error) *Error {
 	return New(CodeInternal, "internal server error").WithCause(cause)
 }
@@ -114,6 +118,8 @@ func statusFor(code Code) int {
 		return http.StatusNotFound
 	case CodeConflict:
 		return http.StatusConflict
+	case CodeUnavailable:
+		return http.StatusBadGateway
 	default:
 		return http.StatusInternalServerError
 	}

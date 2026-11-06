@@ -1,14 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Plus, RotateCcw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Moon, Plus, RotateCcw, Sun, X } from 'lucide-react';
 
 import {
   ASSET_ROLES,
   deleteBrandingAsset,
   getBrandingProfile,
   listBrandingAssets,
+  LOGIN_BACKGROUND_ROLE,
   putBrandingProfile,
   uploadBrandingAsset,
+  type LoginLayout,
 } from '@/api/branding';
 import { fetchDashboard, type UsableModule } from '@/api/dashboard';
 import { KeycloakSyncCard } from '@/components/KeycloakSyncCard';
@@ -16,14 +18,38 @@ import { PortalHome } from '@/components/PortalHome';
 import { useMe } from '@/hooks/useMe';
 import {
   BRAND_SCHEMA,
-  brandCssVars,
   copyText,
+  DARK_KEYS,
+  darkCssVars,
+  darkThemeHex,
   isColor,
+  lightCssVars,
   lintBrand,
   type BrandJSON,
   type BrandSection,
 } from '@/lib/brand';
 import { cn } from '@/lib/cn';
+import { resolveTheme, useThemePreference } from '@/lib/theme';
+
+const DARK_AFFECTS: Record<string, string> = {
+  primary: 'Buttons and links in dark mode.',
+  primary_hover: 'Hover state of buttons and links.',
+  accent: 'Icon tiles and active nav background.',
+  background: 'Cards, top bar and panels.',
+  muted: 'Chips and secondary panels in modules.',
+  foreground: 'Body text and headings.',
+  border: 'Card outlines and dividers.',
+  page: 'Page background behind the cards.',
+};
+
+const FALLBACK_THEME = Object.fromEntries(BRAND_SCHEMA.theme.map((f) => [f.key, f.fallback]));
+
+/** Every preview variable for one mode, so the page's own mode never leaks in. */
+function previewVars(draft: BrandJSON, mode: 'light' | 'dark'): React.CSSProperties {
+  const full: BrandJSON = { ...draft, theme: { ...FALLBACK_THEME, ...draft.theme } };
+  const vars = mode === 'light' ? lightCssVars(full) : { ...lightCssVars(full), ...darkCssVars(full) };
+  return { ...vars, colorScheme: mode } as React.CSSProperties;
+}
 
 const SECTIONS: { id: BrandSection; label: string; blurb: string }[] = [
   { id: 'theme', label: 'Theme', blurb: 'Colours. Each key becomes a CSS variable used across the portal.' },
@@ -114,6 +140,27 @@ export function BrandingPage() {
     setTexts((t) => ({ ...t, [section]: pretty({ ...cur, [key]: value }) }));
   };
 
+  /** Sets or (value undefined) clears a theme.dark override. */
+  const setDarkKey = (key: string, value: string | undefined) => {
+    const cur = parsed.theme.value;
+    if (!cur) return;
+    const dark = { ...(cur.dark && typeof cur.dark === 'object' ? (cur.dark as Record<string, unknown>) : {}) };
+    if (value === undefined) delete dark[key];
+    else dark[key] = value;
+    const next = { ...cur };
+    if (Object.keys(dark).length) next.dark = dark;
+    else delete next.dark;
+    setTexts((t) => ({ ...t, theme: pretty(next) }));
+  };
+
+  const { preference } = useThemePreference();
+  const [previewMode, setPreviewMode] = useState<'light' | 'dark'>(() => resolveTheme(preference));
+  const darkDraft = (draft.theme?.dark && typeof draft.theme.dark === 'object' ? draft.theme.dark : {}) as Record<string, unknown>;
+  const derivedDark = darkThemeHex({ ...FALLBACK_THEME, ...draft.theme, dark: {} });
+
+  const loginBackground = assets.data?.find((a) => a.role === LOGIN_BACKGROUND_ROLE);
+  const loginLayout: LoginLayout = draft.copy?.login_layout === 'centered' ? 'centered' : 'panel';
+
   const active = SECTIONS.find((s) => s.id === tab)!;
   const sectionError = parsed[tab].error;
   const previewModules = dash.data?.usable_modules.length ? dash.data.usable_modules : SAMPLE_MODULES;
@@ -146,13 +193,13 @@ export function BrandingPage() {
             type="button"
             disabled={!dirty || parseErrors.length > 0 || save.isPending}
             onClick={() => save.mutate()}
-            className="rounded-md bg-den-primary px-3 py-2 text-sm font-medium text-white hover:bg-den-primary-hover disabled:opacity-40"
+            className="rounded-md bg-den-primary px-3 py-2 text-sm font-medium text-den-on-primary hover:bg-den-primary-hover disabled:opacity-40"
           >
             {save.isPending ? 'Saving…' : 'Save new revision'}
           </button>
         </div>
       </div>
-      {save.isError && <p className="text-sm text-red-700">{(save.error as Error).message}</p>}
+      {save.isError && <p className="text-sm text-den-danger">{(save.error as Error).message}</p>}
 
       <div className="overflow-hidden rounded-xl border border-den-border bg-den-surface">
         <div className="flex border-b border-den-border">
@@ -167,7 +214,7 @@ export function BrandingPage() {
               )}
             >
               {s.label}
-              {parsed[s.id].error && <span className="ml-1 text-red-600">•</span>}
+              {parsed[s.id].error && <span className="ml-1 text-den-danger">•</span>}
               {tab === s.id && <span className="absolute inset-x-2 -bottom-px h-0.5 bg-den-primary" />}
             </button>
           ))}
@@ -179,25 +226,25 @@ export function BrandingPage() {
             <textarea
               spellCheck={false}
               className={cn(
-                'mt-2 h-80 w-full rounded-md border bg-slate-50 px-3 py-2 font-mono text-xs leading-relaxed text-slate-900',
-                sectionError ? 'border-red-400' : 'border-den-border',
+                'mt-2 h-80 w-full rounded-md border bg-den-field px-3 py-2 font-mono text-xs leading-relaxed text-den-foreground',
+                sectionError ? 'border-den-danger' : 'border-den-border',
               )}
               value={texts[tab]}
               onChange={(e) => setTexts((t) => ({ ...t, [tab]: e.target.value }))}
             />
             <div className="mt-2 text-xs">
               {sectionError ? (
-                <span className="inline-flex items-center gap-1 text-red-700">
+                <span className="inline-flex items-center gap-1 text-den-danger">
                   <AlertTriangle size={12} /> Invalid JSON: {sectionError} — preview shows the last valid parts.
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1 text-emerald-700">
+                <span className="inline-flex items-center gap-1 text-den-success">
                   <CheckCircle2 size={12} /> Valid JSON
                 </span>
               )}
             </div>
             {issues.filter((i) => i.section === tab).length > 0 && (
-              <ul className="mt-2 space-y-1 text-xs text-amber-800">
+              <ul className="mt-2 space-y-1 text-xs text-den-warn">
                 {issues
                   .filter((i) => i.section === tab)
                   .map((i) => (
@@ -262,6 +309,65 @@ export function BrandingPage() {
                 })}
               </tbody>
             </table>
+            {tab === 'theme' && (
+              <>
+                <h3 className="mt-5 flex items-center gap-1.5 text-sm font-semibold">
+                  <Moon size={13} /> Dark mode
+                </h3>
+                <p className="mt-1 text-[11px] text-den-foreground/60">
+                  Optional overrides under <code className="font-mono">theme.dark</code>. Empty keys are derived from the
+                  colours above, so dark mode always matches your brand. Used by Den, every paired module and the sign-in
+                  page.
+                </p>
+                <table className="mt-2 w-full text-xs">
+                  <tbody>
+                    {DARK_KEYS.map((key) => {
+                      const raw = darkDraft[key];
+                      const override = typeof raw === 'string' ? raw : undefined;
+                      const derived = derivedDark?.[key as keyof typeof derivedDark] ?? '#000000';
+                      const shown = override && isColor(override) && override.length === 7 ? override : derived;
+                      return (
+                        <tr key={key} className="border-t border-den-border align-top">
+                          <td className="py-2 pr-2">
+                            <code className="font-mono font-semibold">dark.{key}</code>
+                          </td>
+                          <td className="py-2 pr-2 text-den-foreground/70">{DARK_AFFECTS[key]}</td>
+                          <td className="py-2">
+                            <span className="inline-flex items-center gap-1.5">
+                              <input
+                                type="color"
+                                disabled={!!sectionError}
+                                value={shown}
+                                onChange={(e) => setDarkKey(key, e.target.value)}
+                                className="h-6 w-7 cursor-pointer rounded border border-den-border bg-transparent p-0"
+                                title="Pick a dark-mode colour (writes into theme.dark)"
+                              />
+                              {override !== undefined ? (
+                                <>
+                                  <span className="font-mono">{override}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDarkKey(key, undefined)}
+                                    className="text-den-foreground/50 hover:text-den-foreground"
+                                    title="Remove override (use the derived colour)"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                </>
+                              ) : (
+                                <span className="font-mono text-den-foreground/50">
+                                  {derived} <em>derived</em>
+                                </span>
+                              )}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </>
+            )}
             <p className="mt-3 text-[11px] text-den-foreground/50">
               Extra keys are kept and passed to paired modules, but the Den portal ignores them. Missing keys use the
               default shown by the colour picker.
@@ -279,16 +385,35 @@ export function BrandingPage() {
               {!dash.data?.usable_modules.length && ' Sample services shown until modules are live.'}
             </p>
           </div>
-          {dirty && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900">Unsaved changes</span>}
+          <div className="flex items-center gap-2">
+            {dirty && <span className="rounded-full bg-den-warn-bg px-2 py-0.5 text-xs text-den-warn">Unsaved changes</span>}
+            <div role="radiogroup" aria-label="Preview mode" className="flex rounded-full border border-den-border bg-den-surface p-0.5">
+              {(['light', 'dark'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="radio"
+                  aria-checked={previewMode === m}
+                  onClick={() => setPreviewMode(m)}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium capitalize',
+                    previewMode === m ? 'bg-den-primary text-den-on-primary' : 'text-den-foreground/60 hover:text-den-foreground',
+                  )}
+                >
+                  {m === 'light' ? <Sun size={12} /> : <Moon size={12} />} {m}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
-        <div className="mt-3 overflow-hidden rounded-xl border border-slate-300 shadow-lg">
-          <div className="flex items-center gap-1.5 border-b border-slate-200 bg-slate-100 px-3 py-2">
+        <div className="mt-3 overflow-hidden rounded-xl border border-den-border shadow-lg">
+          <div className="flex items-center gap-1.5 border-b border-den-border bg-den-muted px-3 py-2">
             <span className="h-2.5 w-2.5 rounded-full bg-red-300" />
             <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-300" />
-            <span className="ml-3 rounded bg-white px-2 py-0.5 text-[11px] text-slate-500">{window.location.origin}/dashboard</span>
+            <span className="ml-3 rounded bg-den-surface px-2 py-0.5 text-[11px] text-den-foreground/60">{window.location.origin}/dashboard</span>
           </div>
-          <div style={brandCssVars(draft) as React.CSSProperties} className="pointer-events-none select-none bg-den-muted">
+          <div style={previewVars(draft, previewMode)} className="pointer-events-none select-none bg-den-muted text-den-foreground">
             <div className="border-b border-den-border bg-den-surface px-6 py-3 font-heading text-lg font-extrabold text-den-foreground">
               {copyText(draft, 'convention_name') || dash.data?.organization?.display_name || 'Den'}
             </div>
@@ -339,7 +464,7 @@ export function BrandingPage() {
                         }} />
                     </label>
                     {current && (
-                      <button type="button" className="text-red-700 hover:underline" onClick={() => remove.mutate(current.id)}>
+                      <button type="button" className="text-den-danger hover:underline" onClick={() => remove.mutate(current.id)}>
                         Remove
                       </button>
                     )}
@@ -350,7 +475,7 @@ export function BrandingPage() {
           })}
         </div>
         {(upload.error || remove.error) && (
-          <p className="mt-2 text-sm text-red-700">{((upload.error ?? remove.error) as Error).message}</p>
+          <p className="mt-2 text-sm text-den-danger">{((upload.error ?? remove.error) as Error).message}</p>
         )}
         <div className="mt-3 overflow-hidden rounded-lg border border-den-border bg-den-surface">
           <table className="w-full text-sm">
@@ -383,7 +508,138 @@ export function BrandingPage() {
         </div>
       </section>
 
+      <section>
+        <h2 className="text-lg font-heading font-bold">Sign-in background</h2>
+        <p className="text-sm text-den-foreground/70">
+          A big picture behind every sign-in screen: the login page and the sign-in screens of Den and every paired
+          module.
+        </p>
+        <div className="mt-3 grid gap-4 rounded-xl border border-den-border bg-den-surface p-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+          <SignInPreview
+            image={loginBackground ? `/api/v1/public/brand/assets/${LOGIN_BACKGROUND_ROLE}?v=${loginBackground.id}` : undefined}
+            layout={loginLayout}
+            caption={copyText(draft, 'login_caption')}
+          />
+          <div className="space-y-4 text-sm">
+            <div>
+              <p className="font-semibold">Picture</p>
+              <p className="text-xs text-den-foreground/60">
+                Landscape JPG or WebP, about 1920 × 1080, ideally under 2 MB (10 MB at most). Live as soon as it uploads.
+              </p>
+              <div className="mt-1.5 flex gap-3 text-xs">
+                <label className="cursor-pointer text-den-primary hover:underline">
+                  {upload.isPending && upload.variables?.role === LOGIN_BACKGROUND_ROLE
+                    ? 'Uploading…'
+                    : loginBackground
+                      ? 'Replace picture'
+                      : 'Upload picture'}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/avif"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) upload.mutate({ role: LOGIN_BACKGROUND_ROLE, file });
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                {loginBackground && (
+                  <button type="button" className="text-den-danger hover:underline" onClick={() => remove.mutate(loginBackground.id)}>
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+            <fieldset disabled={!!parsed.copy.error}>
+              <legend className="font-semibold">Layout</legend>
+              <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+                {(
+                  [
+                    ['panel', 'Panel on the right', 'Picture fills the screen, the form sits in a panel docked right.'],
+                    ['centered', 'Centred card', 'Picture fills the screen, the form stays a card in the middle.'],
+                  ] as const
+                ).map(([value, label, hint]) => (
+                  <label
+                    key={value}
+                    className={cn(
+                      'cursor-pointer rounded-md border p-2.5',
+                      loginLayout === value ? 'border-den-primary bg-den-accent' : 'border-den-border',
+                    )}
+                  >
+                    <span className="flex items-center gap-2 font-medium">
+                      <input
+                        type="radio"
+                        name="login-layout"
+                        checked={loginLayout === value}
+                        onChange={() => setKey('copy', 'login_layout', value)}
+                      />
+                      {label}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-den-foreground/60">{hint}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="mt-1.5 text-xs text-den-foreground/60">Phones always get the centred card.</p>
+            </fieldset>
+            <label className="block">
+              <span className="font-semibold">Caption</span>
+              <input
+                disabled={!!parsed.copy.error}
+                value={copyText(draft, 'login_caption')}
+                onChange={(e) => setKey('copy', 'login_caption', e.target.value)}
+                placeholder="Optional, e.g. a slogan. Hidden when empty."
+                className="mt-1.5 w-full rounded-md border border-den-border bg-den-field px-3 py-2"
+              />
+            </label>
+            <p className="text-xs text-den-foreground/60">
+              Layout and caption are part of the brand JSON (<code className="font-mono">copy.login_layout</code>,{' '}
+              <code className="font-mono">copy.login_caption</code>): <strong>Save new revision</strong> to publish them.
+            </p>
+          </div>
+        </div>
+      </section>
+
       <KeycloakSyncCard />
+    </div>
+  );
+}
+
+const PREVIEW_CAPTION = 'text-center text-white [text-shadow:0_1px_8px_rgb(0_0_0/0.7)]';
+
+/** Miniature of the sign-in screen with the current picture and the unsaved layout and caption. */
+function SignInPreview({ image, layout, caption }: { image?: string; layout: LoginLayout; caption: string }) {
+  const form = (
+    <div className="w-full space-y-1.5">
+      <div className="h-2 w-1/2 rounded bg-den-foreground/25" />
+      <div className="h-3 rounded border border-den-border bg-den-field" />
+      <div className="h-3 rounded border border-den-border bg-den-field" />
+      <div className="h-3 rounded bg-den-primary" />
+    </div>
+  );
+  return (
+    <div
+      className="pointer-events-none relative aspect-video select-none overflow-hidden rounded-lg border border-den-border bg-den-muted bg-cover bg-center"
+      style={image ? { backgroundImage: `url(${JSON.stringify(image)})` } : undefined}
+    >
+      {!image && (
+        <span className="absolute inset-x-0 top-3 text-center text-xs text-den-foreground/50">No picture yet: sign-in screens look as before.</span>
+      )}
+      {layout === 'panel' ? (
+        <>
+          {caption && (
+            <p className={`absolute inset-y-0 left-0 right-[34%] flex items-center justify-center p-4 text-sm font-light ${PREVIEW_CAPTION}`}>
+              {caption}
+            </p>
+          )}
+          <div className="absolute inset-y-0 right-0 flex w-[34%] items-center bg-den-surface p-3 shadow-[-6px_0_18px_rgb(0_0_0/0.3)]">{form}</div>
+        </>
+      ) : (
+        <div className={cn('absolute inset-0 flex flex-col items-center justify-center gap-2', image && 'bg-black/40')}>
+          <div className="w-[34%] rounded-md border border-den-border bg-den-surface p-3 shadow">{form}</div>
+          {caption && <p className={`max-w-[70%] text-xs ${PREVIEW_CAPTION}`}>{caption}</p>}
+        </div>
+      )}
     </div>
   );
 }

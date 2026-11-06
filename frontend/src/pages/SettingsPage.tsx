@@ -43,7 +43,7 @@ export function SettingsPage() {
             </label>
             <button
               type="button"
-              className="bg-den-primary text-white px-3 py-2 rounded-md hover:bg-den-primary-hover"
+              className="bg-den-primary text-den-on-primary px-3 py-2 rounded-md hover:bg-den-primary-hover"
               onClick={() => {
                 setDevUser(devUser.trim() || 'dev-admin');
                 setSaved(true);
@@ -51,7 +51,7 @@ export function SettingsPage() {
             >
               Save
             </button>
-            {saved && <span className="ml-2 text-sm text-green-700">Saved locally.</span>}
+            {saved && <span className="ml-2 text-sm text-den-success">Saved locally.</span>}
           </div>
         )}
       </section>

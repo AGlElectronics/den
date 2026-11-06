@@ -9,6 +9,8 @@
 //
 //	Authenticated (human UI, dev-header or OIDC):
 //	GET    /api/v1/me
+//	GET    /api/v1/me/preferences
+//	PUT    /api/v1/me/preferences                — theme: system | light | dark
 //	GET    /api/v1/dashboard
 //	GET    /api/v1/modules
 //	POST   /api/v1/modules
@@ -26,11 +28,20 @@
 //	PUT    /api/v1/org-settings
 //	GET    /api/v1/keycloak-sync                 — login branding push status
 //	POST   /api/v1/keycloak-sync                 — push branding to Keycloak now
+//	GET    /api/v1/operations/status             — databases + backup status (operator)
+//	PUT    /api/v1/operations/settings           — backup hour + retention
+//	GET    /api/v1/operations/backups
+//	POST   /api/v1/operations/backups            — back up now
+//	POST   /api/v1/operations/backups/download-link
+//
+//	DELETE /api/v1/modules/{id}?database=drop&confirm=<slug> also drops the
+//	module's database (backed up first); without it the data is kept.
 //
 //	Public:
 //	POST /api/v1/integrations/pairing/redeem?token=... — one-shot token → credential
 //	GET  /api/v1/public/brand                         — brand bundle for login screens
 //	GET  /api/v1/public/brand/assets/{role}           — newest asset of a role (logo, …)
+//	GET  /api/v1/backup-downloads/{token}             — one-time backup download link
 //
 //	Module-bearer auth (Authorization: Bearer <module credential>):
 //	GET /api/v1/integrations/branding/profile
@@ -38,10 +49,12 @@
 //	GET /api/v1/integrations/branding/assets/{id}
 //	GET /api/v1/integrations/settings
 //	GET /api/v1/integrations/bundle                   — brand + settings in one call
+//	GET/PUT /api/v1/integrations/user-preferences     — a person's theme choice
 package http
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -79,7 +92,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 	r.Use(chimiddleware.RequestID)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Recoverer)
-	r.Use(chimiddleware.Timeout(60 * time.Second))
+	r.Use(timeoutExceptLongRunning(60 * time.Second))
 
 	r.Use(hlog.NewHandler(deps.Logger))
 	r.Use(hlog.AccessHandler(func(req *http.Request, status, size int, duration time.Duration) {
@@ -112,13 +125,16 @@ func NewRouter(deps Deps, version string) http.Handler {
 
 	// --- Handlers -------------------------------------------------------------
 
-	resolver := auth.NewResolver(deps.Pool, deps.Config.AdminGroups)
+	resolver := auth.NewResolver(deps.Pool, deps.Config.AdminGroups, deps.Config.MemberGroups)
 	authMW := auth.Middleware(deps.Config, resolver, deps.OIDCVerifier)
 
-	modH := newModuleHandler(deps.Pool)
+	ops := newOpsClient(deps.Config.OperatorURL, deps.Config.OperatorToken)
+	modH := newModuleHandler(deps.Pool, ops)
+	opsH := &operationsHandler{ops: ops}
 	brandH := newBrandingHandler(deps.Pool, deps.Files)
 	pairH := newPairingHandler(deps.Pool, deps.Config.AppBaseURL)
 	settingsH := &orgSettingsHandler{pool: deps.Pool}
+	prefsH := &preferencesHandler{pool: deps.Pool}
 	kcSync := deps.KeycloakSync
 	if kcSync == nil {
 		kcSync = NewKeycloakSync(deps.Pool, deps.Files, keycloak.Config{}, "", deps.Logger)
@@ -135,7 +151,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 	// --- API --------------------------------------------------------------
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/health", health.health)
-		api.Get("/role-catalog", roleCatalogHandler(deps.Config.AdminGroups))
+		api.Get("/role-catalog", roleCatalogHandler(deps.Config.AdminGroups, deps.Config.MemberGroups))
 
 		api.Route("/v1", func(v1 chi.Router) {
 			// --- Integration (server-to-server) -------------------------
@@ -151,18 +167,24 @@ func NewRouter(deps Deps, version string) http.Handler {
 					bearer.Route("/branding", brandH.integrationRoutes)
 					bearer.Get("/settings", settingsH.integrationGet)
 					bearer.Get("/bundle", brandH.integrationBundle(settingsH))
+					bearer.Get("/user-preferences", prefsH.integrationGet)
+					bearer.Put("/user-preferences", prefsH.integrationPut)
 				})
 			})
 
 			// --- Public: login screens need the brand before sign-in ----
 			v1.Route("/public", brandH.publicRoutes(settingsH))
+			// One-time backup download links minted by an admin.
+			v1.Get("/backup-downloads/{token}", opsH.download)
 
 			// --- Human UI (dev header or OIDC) --------------------------
 			v1.Group(func(secure chi.Router) {
 				secure.Use(authMW)
 
 				secure.Get("/me", meHandler)
-				secure.Get("/dashboard", dashboardHandler(deps.Pool))
+				secure.Get("/me/preferences", prefsH.getMine)
+				secure.Put("/me/preferences", prefsH.putMine)
+				secure.With(auth.RequireRole(defaultOrgID, "member", "admin", "owner")).Get("/dashboard", dashboardHandler(deps.Pool))
 
 				// Admin console APIs: convention admins / owners only.
 				secure.Group(func(admin chi.Router) {
@@ -176,10 +198,28 @@ func NewRouter(deps Deps, version string) http.Handler {
 					admin.Put("/org-settings", settingsH.put)
 					admin.Get("/keycloak-sync", kcSync.getStatus)
 					admin.Post("/keycloak-sync", kcSync.syncNow)
+					admin.Route("/operations", opsH.routes)
 				})
 			})
 		})
 	})
 
 	return r
+}
+
+// timeoutExceptLongRunning applies the request timeout everywhere except
+// backup downloads and module removal (which backs the database up first).
+func timeoutExceptLongRunning(d time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		limited := chimiddleware.Timeout(d)(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p := r.URL.Path
+			if strings.HasPrefix(p, "/api/v1/backup-downloads/") ||
+				(r.Method == http.MethodDelete && strings.HasPrefix(p, "/api/v1/modules/")) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			limited.ServeHTTP(w, r)
+		})
+	}
 }

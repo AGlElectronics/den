@@ -2,15 +2,58 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Den tokens. Brand colours (primary … border) are overridden at runtime from
+ * the branding profile (lib/brand.ts writes :root and :root.dark); the rest
+ * are fixed. The .dark values are the derived palette for the default brand.
+ */
 :root {
   color-scheme: light;
   --den-primary: #5048e5;
   --den-primary-hover: #4338ca;
+  --den-on-primary: #ffffff;
   --den-accent: #e0e7ff;
   --den-surface: #ffffff;
   --den-foreground: #1c1b22;
   --den-muted: #f5f5f7;
   --den-border: #e4e4e7;
+
+  /* Admin console page and code editors: neutral, not brand-tinted. */
+  --den-canvas: #f8fafc;
+  --den-field: #f8fafc;
+
+  --den-danger: #b91c1c;
+  --den-danger-bg: #fef2f2;
+  --den-danger-border: #fecaca;
+  --den-success: #047857;
+  --den-success-bg: #dcfce7;
+  --den-warn: #78350f;
+  --den-warn-bg: #fffbeb;
+  --den-warn-border: #fde68a;
+}
+
+.dark {
+  color-scheme: dark;
+  --den-primary: hsl(243 75% 59%);
+  --den-primary-hover: hsl(243 75% 65%);
+  --den-on-primary: #ffffff;
+  --den-accent: hsl(226 35% 22%);
+  --den-surface: hsl(243 9% 13%);
+  --den-foreground: hsl(243 10% 96%);
+  --den-muted: hsl(243 9% 10%);
+  --den-border: hsl(243 9% 22%);
+
+  --den-canvas: var(--den-muted);
+  --den-field: var(--den-muted);
+
+  --den-danger: #f87171;
+  --den-danger-bg: rgb(239 68 68 / 0.12);
+  --den-danger-border: rgb(239 68 68 / 0.35);
+  --den-success: #34d399;
+  --den-success-bg: rgb(16 185 129 / 0.15);
+  --den-warn: #fcd34d;
+  --den-warn-bg: rgb(245 158 11 / 0.1);
+  --den-warn-border: rgb(245 158 11 / 0.3);
 }
 
 html,

@@ -38,3 +38,17 @@ Several teams have tried this and been bitten by:
   Stash's problem.
 - The ecosystem can scale and fail independently per module, which is
   the whole point.
+
+## Amendment — 2026-11-04: one server, Den-managed databases
+
+Small deployments run every module database on **one PostgreSQL server**.
+The decision above still applies: one database and one login per module,
+`CONNECT` revoked from everyone else, no SQL across modules. What is shared is
+the server (CPU, memory, disk), not data. A module that outgrows it moves to
+its own server.
+
+Den's operator (`cmd/operator`) is the only component with the server's admin
+login. It creates and drops module databases on Den's request and backs up
+the whole server. `MANAGED_DATABASES=false` turns database management off for
+deployments where each module has its own server. Details, backups and
+restore: [docs/operations.md](../../../docs/operations.md).

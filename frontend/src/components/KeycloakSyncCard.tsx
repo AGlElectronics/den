@@ -18,7 +18,7 @@ export function KeycloakSyncCard() {
         <div>
           <h2 className="font-heading text-base font-bold">Sign-in page (Keycloak)</h2>
           <p className="text-den-foreground/70">
-            Den pushes the organisation name, tagline, logo, favicon and colours into Keycloak whenever branding or
+            Den pushes the organisation name, tagline, logo, favicon, colours and sign-in background into Keycloak whenever branding or
             organisation settings change, and re-checks every few minutes.
           </p>
         </div>
@@ -41,7 +41,7 @@ export function KeycloakSyncCard() {
             Not connected. Set <code>KEYCLOAK_ADMIN_URL</code> and <code>KEYCLOAK_CLIENT_SECRET</code> on the Den backend.
           </p>
         ) : s.last_error ? (
-          <p className="text-red-700">Last sync failed: {s.last_error}</p>
+          <p className="text-den-danger">Last sync failed: {s.last_error}</p>
         ) : s.synced_at ? (
           <p className="text-den-foreground/70">
             Realm <span className="font-mono">{s.realm}</span> is on revision {s.revision}, synced{' '}

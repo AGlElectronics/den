@@ -27,9 +27,9 @@ const TOOLS = [
 
 function Stat({ label, value }: { label: string; value: number | string | undefined }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="mt-1 font-heading text-2xl font-bold text-slate-900">{value ?? '…'}</div>
+    <div className="rounded-xl border border-den-border bg-den-surface p-4">
+      <div className="text-xs font-medium uppercase tracking-wide text-den-foreground/60">{label}</div>
+      <div className="mt-1 font-heading text-2xl font-bold text-den-foreground">{value ?? '…'}</div>
     </div>
   );
 }
@@ -41,8 +41,8 @@ export function OrganizePage() {
   return (
     <div className="max-w-5xl space-y-8">
       <div>
-        <h1 className="font-heading text-2xl font-bold text-slate-900">Overview</h1>
-        <p className="mt-1 text-sm text-slate-600">
+        <h1 className="font-heading text-2xl font-bold text-den-foreground">Overview</h1>
+        <p className="mt-1 text-sm text-den-foreground/70">
           Set up modules and the look of the portal. Members only ever see the portal home.
         </p>
       </div>
@@ -55,7 +55,7 @@ export function OrganizePage() {
       </div>
 
       {(d?.unpaired_modules ?? 0) > 0 && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        <div className="rounded-xl border border-den-warn-border bg-den-warn-bg p-4 text-sm text-den-warn">
           {d?.unpaired_modules} module{d?.unpaired_modules === 1 ? '' : 's'} still unpaired. Members
           won&apos;t see {d?.unpaired_modules === 1 ? 'it' : 'them'} until pairing finishes and a public URL is
           set.{' '}
@@ -70,13 +70,13 @@ export function OrganizePage() {
           <Link
             key={to}
             to={to}
-            className="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-400 hover:shadow-md"
+            className="group rounded-xl border border-den-border bg-den-surface p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-den-foreground/40 hover:shadow-md"
           >
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-den-muted text-den-foreground/80">
               <Icon size={18} />
             </span>
-            <div className="mt-3 font-heading text-lg font-bold text-slate-900">{title}</div>
-            <p className="mt-1 text-sm text-slate-600">{description}</p>
+            <div className="mt-3 font-heading text-lg font-bold text-den-foreground">{title}</div>
+            <p className="mt-1 text-sm text-den-foreground/70">{description}</p>
           </Link>
         ))}
       </div>

@@ -36,6 +36,9 @@ type loginBrand struct {
 	Theme            json.RawMessage `json:"theme"`
 	LogoURL          string          `json:"logo_url,omitempty"`
 	FaviconURL       string          `json:"favicon_url,omitempty"`
+	BackgroundURL    string          `json:"background_url,omitempty"`
+	LoginLayout      string          `json:"login_layout,omitempty"`
+	LoginCaption     string          `json:"login_caption,omitempty"`
 }
 
 type keycloakSyncStatus struct {
@@ -149,6 +152,12 @@ func (s *KeycloakSync) push(ctx context.Context) (int, error) {
 	if t, ok := copyMap["tagline"].(string); ok {
 		lb.Tagline = strings.TrimSpace(t)
 	}
+	if t, ok := copyMap["login_layout"].(string); ok {
+		lb.LoginLayout = strings.TrimSpace(t)
+	}
+	if t, ok := copyMap["login_caption"].(string); ok {
+		lb.LoginCaption = strings.TrimSpace(t)
+	}
 	asset := func(role string) string {
 		id, ok := b.Assets[role]
 		if !ok {
@@ -156,7 +165,7 @@ func (s *KeycloakSync) push(ctx context.Context) (int, error) {
 		}
 		return s.publicURL + "/api/v1/public/brand/assets/" + role + "?v=" + id
 	}
-	lb.LogoURL, lb.FaviconURL = asset("logo"), asset("favicon")
+	lb.LogoURL, lb.FaviconURL, lb.BackgroundURL = asset("logo"), asset("favicon"), asset(assetLoginBackground)
 	attr, err := json.Marshal(lb)
 	if err != nil {
 		return 0, err

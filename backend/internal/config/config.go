@@ -45,6 +45,9 @@ type Config struct {
 	DevDefaultUser string
 	// AdminGroups are the IdP groups whose members are org admins.
 	AdminGroups []string
+	// MemberGroups are the IdP groups whose members may use the portal.
+	// Empty means every signed-in user is a member.
+	MemberGroups []string
 
 	CORSAllowedOrigins []string
 
@@ -54,6 +57,10 @@ type Config struct {
 	KeycloakRealm        string
 	KeycloakClientID     string
 	KeycloakClientSecret string
+
+	// The internal operator (module databases + backups). Off when empty.
+	OperatorURL   string
+	OperatorToken string
 
 	ShutdownTimeout time.Duration
 }
@@ -80,12 +87,16 @@ func Load() (*Config, error) {
 		OIDCAudience:       getEnv("OIDC_AUDIENCE", ""),
 		DevDefaultUser:     getEnv("DEV_DEFAULT_USER", "dev-admin"),
 		AdminGroups:        splitCSV(getEnv("DEN_ADMIN_GROUPS", "den-admin")),
+		MemberGroups:       splitCSV(getEnv("DEN_MEMBER_GROUPS", "den-member")),
 		CORSAllowedOrigins: splitCSV(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3001")),
 		ShutdownTimeout:    getEnvDuration("SHUTDOWN_TIMEOUT", 15*time.Second),
 
 		KeycloakAdminURL:     getEnv("KEYCLOAK_ADMIN_URL", ""),
 		KeycloakClientID:     getEnv("KEYCLOAK_CLIENT_ID", "den-keycloak"),
 		KeycloakClientSecret: getEnv("KEYCLOAK_CLIENT_SECRET", ""),
+
+		OperatorURL:   strings.TrimRight(getEnv("OPERATOR_URL", ""), "/"),
+		OperatorToken: getEnv("OPERATOR_TOKEN", ""),
 	}
 	cfg.KeycloakRealm = getEnv("KEYCLOAK_REALM", realmFromIssuer(cfg.OIDCIssuerURL))
 
@@ -113,6 +124,9 @@ func (c *Config) validate() error {
 	}
 	if c.S3SecretAccessKey == "" {
 		errs = append(errs, "S3_SECRET_ACCESS_KEY is required")
+	}
+	if c.OperatorURL != "" && c.OperatorToken == "" {
+		errs = append(errs, "OPERATOR_TOKEN is required when OPERATOR_URL is set")
 	}
 	switch c.AuthMode {
 	case AuthModeOIDC:

@@ -28,6 +28,8 @@ import (
 //	org_email_domain    — e.g. "example.org"
 //	username_template   — login names for new accounts, e.g. "{nickname}"
 //	org_email_template  — organisation email names, e.g. "{first}.{last}"
+//	events_public_schedule — Events serves its published schedule publicly (bool)
+//	wiki_public_links   — the Wiki may create public share links (bool)
 
 type orgSettingsHandler struct {
 	pool *pgxpool.Pool
@@ -148,6 +150,15 @@ func normalizeOrgSettings(in map[string]any) map[string]string {
 		if t, ok := str(key); ok && t != "" {
 			if msg := validateNameTemplate(t); msg != "" {
 				fields[key] = msg
+			}
+		}
+	}
+	for _, key := range []string{"events_public_schedule", "wiki_public_links"} {
+		if v, ok := in[key]; ok {
+			if v == nil {
+				delete(in, key)
+			} else if _, isBool := v.(bool); !isBool {
+				fields[key] = "must be true or false"
 			}
 		}
 	}

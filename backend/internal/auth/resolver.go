@@ -21,13 +21,16 @@ var defaultOrgID = uuid.MustParse("00000000-0000-0000-0000-00000000d001")
 // sqlc-driven so the scaffold builds without a `sqlc generate` step; the
 // queries themselves are tiny and stable.
 type Resolver struct {
-	pool        *pgxpool.Pool
-	adminGroups []string
+	pool         *pgxpool.Pool
+	adminGroups  []string
+	memberGroups []string
 }
 
-// NewResolver builds a resolver; members of adminGroups are org admins.
-func NewResolver(pool *pgxpool.Pool, adminGroups []string) *Resolver {
-	return &Resolver{pool: pool, adminGroups: adminGroups}
+// NewResolver builds a resolver; members of adminGroups are org admins and
+// members of memberGroups are org members (everyone when memberGroups is
+// empty).
+func NewResolver(pool *pgxpool.Pool, adminGroups, memberGroups []string) *Resolver {
+	return &Resolver{pool: pool, adminGroups: adminGroups, memberGroups: memberGroups}
 }
 
 // LoadOrProvisionDevUser is called from dev-mode middleware. The name is
@@ -133,8 +136,9 @@ func (r *Resolver) provisionDevUser(ctx context.Context, name string) (uuid.UUID
 
 // LoadOrProvisionOIDCUser upserts the local user from verified ID-token
 // claims and syncs their default-org role from the IdP on every request:
-// members of an admin group are admins, everyone else is a member. Removing
-// someone from the group demotes them; an "owner" row is never changed.
+// members of an admin group are admins, members of a member group are
+// members, and anyone else has no role (no portal access). Removing someone
+// from a group demotes them; an "owner" row is never changed.
 func (r *Resolver) LoadOrProvisionOIDCUser(ctx context.Context, claims *OIDCClaims) (*User, error) {
 	if claims == nil || claims.Subject == "" || claims.Issuer == "" {
 		return nil, errors.New("oidc claims missing issuer/subject")
@@ -154,11 +158,21 @@ func (r *Resolver) LoadOrProvisionOIDCUser(ctx context.Context, claims *OIDCClai
 		return nil, fmt.Errorf("upsert oidc user: %w", err)
 	}
 
-	role := "member"
-	if InAnyGroup(claims.Groups, r.adminGroups) {
+	role := ""
+	switch {
+	case InAnyGroup(claims.Groups, r.adminGroups):
 		role = "admin"
+	case len(r.memberGroups) == 0 || InAnyGroup(claims.Groups, r.memberGroups):
+		role = "member"
 	}
-	if _, err := r.pool.Exec(ctx, `
+	if role == "" {
+		if _, err := r.pool.Exec(ctx, `
+			DELETE FROM organization_memberships
+			 WHERE organization_id = $1 AND user_id = $2 AND role <> 'owner'
+		`, defaultOrgID, userID); err != nil {
+			return nil, fmt.Errorf("drop org membership: %w", err)
+		}
+	} else if _, err := r.pool.Exec(ctx, `
 		INSERT INTO organization_memberships (organization_id, user_id, role)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (organization_id, user_id) DO UPDATE
