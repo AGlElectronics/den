@@ -64,14 +64,15 @@ func (e *Error) WithCause(cause error) *Error {
 
 // Helpers for common cases.
 
-func NotFound(resource string) *Error    { return New(CodeNotFound, resource+" not found") }
-func BadRequest(msg string) *Error       { return New(CodeBadRequest, msg) }
-func Conflict(msg string) *Error         { return New(CodeConflict, msg) }
-func Unauthorized(msg string) *Error     { return New(CodeUnauthorized, msg) }
-func Forbidden(msg string) *Error        { return New(CodeForbidden, msg) }
+func NotFound(resource string) *Error { return New(CodeNotFound, resource+" not found") }
+func BadRequest(msg string) *Error    { return New(CodeBadRequest, msg) }
+func Conflict(msg string) *Error      { return New(CodeConflict, msg) }
+func Unauthorized(msg string) *Error  { return New(CodeUnauthorized, msg) }
+func Forbidden(msg string) *Error     { return New(CodeForbidden, msg) }
 func Validation(msg string, d any) *Error {
 	return New(CodeValidation, msg).WithDetails(d)
 }
+
 // Unavailable is a dependency (e.g. the operator) failing; msg is shown.
 func Unavailable(msg string) *Error { return New(CodeUnavailable, msg) }
 

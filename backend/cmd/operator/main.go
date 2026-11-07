@@ -17,6 +17,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/AGlElectronics/den/backend/internal/operator"
+	"github.com/AGlElectronics/den/backend/internal/tlscert"
 )
 
 func main() {
@@ -38,6 +39,10 @@ func main() {
 	}
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: op.Router(), ReadHeaderTimeout: 10 * time.Second}
+	tlsOn, err := tlscert.Configure(ctx, srv, log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("tls")
+	}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -48,8 +53,9 @@ func main() {
 		Bool("managed_databases", cfg.ManagedDatabases).
 		Bool("backups", cfg.BackupsEnabled).
 		Str("timezone", cfg.Location.String()).
+		Bool("tls", tlsOn).
 		Msg("den operator ready")
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := tlscert.ListenAndServe(srv); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal().Err(err).Msg("serve")
 	}
 }

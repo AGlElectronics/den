@@ -23,6 +23,7 @@ import { cn } from '@/lib/cn';
 import { useThemeSync } from '@/lib/theme';
 import { isOidcAuthMode, signOutOidc } from '@/auth/oidc';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { runtimeConfig } from '@/runtime-config';
 
 const NAV = [
   { to: '/admin', label: 'Overview', icon: Gauge, exact: true },
@@ -35,7 +36,7 @@ const NAV = [
 
 /** Keycloak's admin console on this realm, derived from the OIDC issuer. */
 function keycloakConsoleURL(): string | undefined {
-  const authority = (import.meta.env.VITE_OIDC_AUTHORITY as string | undefined)?.trim();
+  const authority = runtimeConfig().oidcAuthority;
   if (!authority) return undefined;
   try {
     const u = new URL(authority);

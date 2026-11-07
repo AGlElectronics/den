@@ -51,14 +51,14 @@ func dashboardHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		var (
-			orgID   uuid.UUID
-			slug    string
-			name    string
-			orgs    int64
-			modules int64
-			paired  int64
+			orgID    uuid.UUID
+			slug     string
+			name     string
+			orgs     int64
+			modules  int64
+			paired   int64
 			unpaired int64
-			users   int64
+			users    int64
 		)
 		_ = pool.QueryRow(ctx, `
 			SELECT id, slug, display_name FROM organizations

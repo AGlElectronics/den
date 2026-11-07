@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { getDevUser, setDevUser } from '@/auth/dev';
 import { isOidcAuthMode } from '@/auth/oidc';
+import { runtimeConfig } from '@/runtime-config';
 
 export function SettingsPage() {
   const [devUser, setDevUserLocal] = useState(getDevUser());
@@ -62,7 +63,7 @@ export function SettingsPage() {
           Version: <code>{process.env.DEN_VERSION ?? 'dev'}</code>
         </div>
         <div>
-          API base: <code>{import.meta.env.VITE_API_BASE_URL || '(same origin)'}</code>
+          API base: <code>{runtimeConfig().apiBaseUrl || '(same origin)'}</code>
         </div>
       </section>
     </div>

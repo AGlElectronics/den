@@ -1,4 +1,4 @@
-// Package files wraps an S3-compatible object storage client (MinIO in dev,
+// Package files wraps an S3-compatible object storage client (SeaweedFS in dev,
 // a real managed bucket in production). Den owns exactly one bucket and
 // never hands out credentials to mated modules; see
 // docs/adr/0004-one-bucket-per-module.md.
@@ -20,8 +20,8 @@ import (
 
 // Client wraps a *minio.Client plus the configured bucket and a public-facing
 // base URL used to rewrite presigned URLs so a browser can actually reach
-// them (e.g. the compose host `minio:9000` is unreachable from the host OS
-// — swap to `localhost:9010` on the way out).
+// them (e.g. the compose host `s3:9000` is unreachable from the host OS
+// — swap to `localhost:9000` on the way out).
 type Client struct {
 	mc            *minio.Client
 	bucket        string
@@ -32,7 +32,7 @@ type Client struct {
 // create keeps `docker compose up` painless on a fresh install.
 //
 // This client is the same code path in dev and prod — the ADR calls out
-// that MinIO is a dev convenience, not a prod decision made in Go.
+// that the dev S3 server is a dev convenience, not a prod decision made in Go.
 func New(ctx context.Context, cfg *config.Config) (*Client, error) {
 	endpointURL, err := url.Parse(cfg.S3Endpoint)
 	if err != nil {
@@ -46,7 +46,7 @@ func New(ctx context.Context, cfg *config.Config) (*Client, error) {
 
 	// Without explicit BucketLookup the SDK auto-detects, which can flip
 	// between path- and virtual-hosted style depending on the host name.
-	// Pin to path-style when configured (default for MinIO in compose).
+	// Pin to path-style when configured (default for the compose S3 server).
 	bucketLookup := minio.BucketLookupAuto
 	if cfg.S3UsePathStyle {
 		bucketLookup = minio.BucketLookupPath
@@ -89,11 +89,11 @@ func publicBaseURL(cfg *config.Config) (*url.URL, error) {
 	if err != nil {
 		return nil, err
 	}
-	// In the compose network the host `minio` resolves to the container;
-	// from the host OS that name is nothing. Rewrite so browsers get a URL
-	// they can hit.
-	if strings.Contains(u.Host, "minio") {
-		u.Host = strings.ReplaceAll(u.Host, "minio", "localhost")
+	// In the compose network the host `s3` (formerly `minio`) resolves to
+	// the container; from the host OS that name is nothing. Rewrite so
+	// browsers get a URL they can hit.
+	if h := u.Hostname(); h == "s3" || h == "minio" {
+		u.Host = strings.Replace(u.Host, h, "localhost", 1)
 	}
 	return u, nil
 }
@@ -130,7 +130,7 @@ func (c *Client) Remove(ctx context.Context, key string) error {
 	return c.mc.RemoveObject(ctx, c.bucket, key, minio.RemoveObjectOptions{})
 }
 
-// PresignedGet is only used for admin-side preview (SPA → MinIO direct in
+// PresignedGet is only used for admin-side preview (SPA → S3 direct in
 // dev). Mated modules never see presigned URLs — they always go through
 // Den's integration API so we can authenticate and audit.
 func (c *Client) PresignedGet(ctx context.Context, key string, expiry time.Duration) (string, error) {

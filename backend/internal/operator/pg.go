@@ -135,7 +135,7 @@ func (p *pg) create(ctx context.Context, name string) (*NewDatabase, error) {
 		User:     url.UserPassword(name, password),
 		Host:     p.cfg.ModuleDBHost,
 		Path:     "/" + name,
-		RawQuery: "sslmode=disable",
+		RawQuery: p.cfg.ModuleDBParams,
 	}
 	return &NewDatabase{Name: name, Username: name, Password: password, DatabaseURL: u.String()}, nil
 }

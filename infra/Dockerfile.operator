@@ -2,11 +2,12 @@
 
 # -----------------------------------------------------------------------------
 # Den operator: module database provisioning + encrypted suite backups.
-# The runtime is the Postgres image so pg_dump/pg_restore match the server's
-# major version (keep both on 16). `age` is included for restores.
+# The runtime is plain Alpine with only the PostgreSQL client tools
+# (pg_dump, pg_dumpall, pg_restore, psql), whose major version must match
+# the server's (keep both on 16). `age` is included for restores.
 # See docs/operations.md at the repository root.
 # -----------------------------------------------------------------------------
-FROM golang:1.25-alpine AS build
+FROM golang:1.27.3-alpine3.24 AS build
 WORKDIR /src
 ENV CGO_ENABLED=0 GOFLAGS=-buildvcs=false
 
@@ -20,10 +21,13 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go build -trimpath -ldflags "-s -w" -o /out/den-operator ./cmd/operator
 
-FROM postgres:16-alpine
-RUN apk add --no-cache age
+FROM alpine:3.24.4
+# postgresql16-client creates the "postgres" user (UID/GID 70), which the
+# Kubernetes manifests and the Helm chart run the operator as.
+RUN apk add --no-cache postgresql16-client age && \
+    test "$(id -u postgres):$(id -g postgres)" = "70:70"
 COPY --from=build /out/den-operator /usr/local/bin/den-operator
-USER postgres
+USER 70:70
 WORKDIR /tmp
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/den-operator"]

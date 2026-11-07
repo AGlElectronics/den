@@ -37,6 +37,9 @@ type Config struct {
 	// ModuleDBHost is the host:port modules use to reach the server; it is
 	// put into the connection URL handed out for new databases.
 	ModuleDBHost string
+	// ModuleDBParams is the query string of the connection URL handed out
+	// for new databases (TLS settings such as sslmode and sslrootcert).
+	ModuleDBParams string
 	// ManagedDatabases lets Den create and drop module databases. Off for
 	// deployments where every service has its own database server.
 	ManagedDatabases bool
@@ -62,6 +65,7 @@ func LoadConfig() (*Config, error) {
 		Token:            env("OPERATOR_TOKEN", ""),
 		PGAdminURL:       env("PG_ADMIN_URL", ""),
 		ModuleDBHost:     env("MODULE_DB_HOST", ""),
+		ModuleDBParams:   env("MODULE_DB_PARAMS", ""),
 		ManagedDatabases: envBool("MANAGED_DATABASES", true),
 		Protected:        map[string]bool{"postgres": true, "template0": true, "template1": true},
 		BackupsEnabled:   envBool("BACKUP_ENABLED", true),
@@ -92,13 +96,21 @@ func LoadConfig() (*Config, error) {
 	}
 	if c.PGAdminURL == "" {
 		errs = append(errs, "PG_ADMIN_URL is required")
-	} else if c.ModuleDBHost == "" {
-		u, err := url.Parse(c.PGAdminURL)
-		if err != nil {
-			errs = append(errs, "PG_ADMIN_URL is not a URL")
-		} else {
+	} else if u, err := url.Parse(c.PGAdminURL); err != nil {
+		errs = append(errs, "PG_ADMIN_URL is not a URL")
+	} else {
+		if c.ModuleDBHost == "" {
 			c.ModuleDBHost = u.Host
 		}
+		if c.ModuleDBParams == "" {
+			c.ModuleDBParams = u.RawQuery
+		}
+	}
+	if c.ModuleDBParams == "" {
+		c.ModuleDBParams = "sslmode=disable"
+	}
+	if _, err := url.ParseQuery(c.ModuleDBParams); err != nil {
+		errs = append(errs, fmt.Sprintf("MODULE_DB_PARAMS: %v", err))
 	}
 
 	loc, err := time.LoadLocation(env("BACKUP_TIMEZONE", "UTC"))

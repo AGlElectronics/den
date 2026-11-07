@@ -103,7 +103,7 @@ type brandingAssetDTO struct {
 }
 
 // listAssets returns asset metadata for the org. URLs point at Den's own
-// stream endpoint — never at MinIO directly, so switching bucket backends
+// stream endpoint — never at the bucket directly, so switching bucket backends
 // later is invisible to clients.
 func (h *brandingHandler) listAssets(r *http.Request, orgID uuid.UUID, urlBuilder func(uuid.UUID) string) ([]brandingAssetDTO, error) {
 	if h.pool == nil {

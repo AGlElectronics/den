@@ -65,6 +65,7 @@ import (
 	"github.com/rs/zerolog/hlog"
 
 	"github.com/AGlElectronics/den/backend/internal/auth"
+	"github.com/AGlElectronics/den/backend/internal/clientip"
 	"github.com/AGlElectronics/den/backend/internal/config"
 	"github.com/AGlElectronics/den/backend/internal/files"
 	"github.com/AGlElectronics/den/backend/internal/keycloak"
@@ -90,7 +91,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(chimiddleware.RequestID)
-	r.Use(chimiddleware.RealIP)
+	r.Use(clientip.Middleware(deps.Config.TrustedProxyCIDRs))
 	r.Use(chimiddleware.Recoverer)
 	r.Use(timeoutExceptLongRunning(60 * time.Second))
 

@@ -1,10 +1,11 @@
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 
-// Rsbuild does not automatically expose `process.env.*` to the bundle the
-// way Vite does. We read the VITE_* contract (so the Dockerfile ARGs look
-// identical to Stash's) and inline each one with `define` below. The
-// Dockerfile is required to pass these as ENV before `npm run build`.
+// Build-time fallbacks for the web app settings. Images read the
+// installation's settings from /config.json at start-up (src/runtime-config.ts);
+// these VITE_* values only fill keys that file leaves out, which is how
+// `npm run dev` with a .env file works. Rsbuild does not forward process.env
+// into import.meta.env by itself, so they are mapped with `define` below.
 const viteEnv = {
   VITE_API_BASE_URL: process.env.VITE_API_BASE_URL ?? '',
   VITE_AUTH_MODE: process.env.VITE_AUTH_MODE ?? 'dev',

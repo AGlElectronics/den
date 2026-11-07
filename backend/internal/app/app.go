@@ -27,6 +27,7 @@ import (
 	"github.com/AGlElectronics/den/backend/internal/files"
 	httpx "github.com/AGlElectronics/den/backend/internal/http"
 	"github.com/AGlElectronics/den/backend/internal/keycloak"
+	"github.com/AGlElectronics/den/backend/internal/tlscert"
 )
 
 // Version is set via -ldflags at build time; defaults to "dev" so a plain
@@ -57,7 +58,7 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 	defer pool.Close()
 	logger.Info().Msg("database connected")
 
-	// MinIO is DEV ONLY — see docs/adr/0003-minio-dev-only.md.
+	// The compose S3 server (SeaweedFS) is DEV ONLY — see docs/adr/0003-minio-dev-only.md.
 	// In production S3_* must point at a real managed bucket; the files
 	// client code path is the same, just a different endpoint.
 	filesCtx, cancelFiles := context.WithTimeout(ctx, 30*time.Second)
@@ -107,6 +108,9 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
+	if _, err := tlscert.Configure(ctx, server, logger); err != nil {
+		return fmt.Errorf("tls: %w", err)
+	}
 
 	return runServer(ctx, server, pool, cfg.ShutdownTimeout, logger)
 }
@@ -118,7 +122,7 @@ func runServer(ctx context.Context, server *nethttp.Server, pool *pgxpool.Pool, 
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info().Str("addr", server.Addr).Msg("http listening")
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, nethttp.ErrServerClosed) {
+		if err := tlscert.ListenAndServe(server); err != nil && !errors.Is(err, nethttp.ErrServerClosed) {
 			errCh <- err
 		}
 		close(errCh)

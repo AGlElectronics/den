@@ -1,7 +1,9 @@
 // Typed fetch wrapper. In dev mode auth is a `X-Dev-User` header; in OIDC
 // mode the installed resolver returns a Bearer token from oidc-client-ts.
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '';
+import { runtimeConfig } from '@/runtime-config';
+
+const apiBaseUrl = () => runtimeConfig().apiBaseUrl;
 
 export type ApiErrorBody = {
   error: {
@@ -47,7 +49,7 @@ type RequestOpts = {
 };
 
 export async function apiRequest<T>(path: string, opts: RequestOpts = {}): Promise<T> {
-  const url = new URL(path.startsWith('http') ? path : `${API_BASE_URL}${path}`, window.location.origin);
+  const url = new URL(path.startsWith('http') ? path : `${apiBaseUrl()}${path}`, window.location.origin);
   if (opts.query) {
     for (const [k, v] of Object.entries(opts.query)) {
       if (v === undefined || v === null) continue;

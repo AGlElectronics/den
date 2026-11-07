@@ -6,12 +6,15 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
+
+	"github.com/AGlElectronics/den/backend/internal/clientip"
 )
 
 type AuthMode string
@@ -28,7 +31,7 @@ type Config struct {
 	HTTPAddr    string
 	DatabaseURL string
 
-	// S3-compatible object storage. In dev this points at the MinIO
+	// S3-compatible object storage. In dev this points at the SeaweedFS
 	// container shipped in infra/docker-compose.yml. In production, point
 	// at a real bucket; see docs/adr/0003-minio-dev-only.md.
 	S3Endpoint        string
@@ -50,6 +53,9 @@ type Config struct {
 	MemberGroups []string
 
 	CORSAllowedOrigins []string
+	// TrustedProxyCIDRs lists the proxies whose X-Forwarded-For entries are
+	// believed when working out the client IP (TRUSTED_PROXY_CIDRS).
+	TrustedProxyCIDRs []netip.Prefix
 
 	// Keycloak admin access for pushing login branding into the realm.
 	// Disabled unless KEYCLOAK_ADMIN_URL and KEYCLOAK_CLIENT_SECRET are set.
@@ -100,6 +106,12 @@ func Load() (*Config, error) {
 	}
 	cfg.KeycloakRealm = getEnv("KEYCLOAK_REALM", realmFromIssuer(cfg.OIDCIssuerURL))
 
+	trusted, err := clientip.ParseCIDRs(getEnv("TRUSTED_PROXY_CIDRS", clientip.DefaultTrustedProxies))
+	if err != nil {
+		return nil, fmt.Errorf("invalid config: TRUSTED_PROXY_CIDRS: %w", err)
+	}
+	cfg.TrustedProxyCIDRs = trusted
+
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -111,7 +123,7 @@ func (c *Config) validate() error {
 	if c.DatabaseURL == "" {
 		errs = append(errs, "DATABASE_URL is required")
 	}
-	// S3 config is required even in dev — MinIO fills the slot. See
+	// S3 config is required even in dev — the dev S3 server fills the slot. See
 	// docs/adr/0003-minio-dev-only.md.
 	if c.S3Endpoint == "" {
 		errs = append(errs, "S3_ENDPOINT is required")

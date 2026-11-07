@@ -112,11 +112,11 @@ func (s *Service) RedeemToken(ctx context.Context, rawToken, label string) (Rede
 	var out RedeemResult
 	err := withTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var (
-			tokenID      uuid.UUID
-			moduleID     uuid.UUID
-			expiresAt    time.Time
-			consumedAt   *time.Time
-			orgID        uuid.UUID
+			tokenID    uuid.UUID
+			moduleID   uuid.UUID
+			expiresAt  time.Time
+			consumedAt *time.Time
+			orgID      uuid.UUID
 		)
 		err := tx.QueryRow(ctx, `
 			SELECT pt.id, pt.module_id, pt.expires_at, pt.consumed_at, m.organization_id

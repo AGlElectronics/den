@@ -86,13 +86,13 @@ func (h *moduleHandler) list(w http.ResponseWriter, r *http.Request) {
 	out := make([]moduleDTO, 0)
 	for rows.Next() {
 		var (
-			dto        moduleDTO
-			id, orgID  uuid.UUID
-			manifest   []byte
-			lastSeen   *time.Time
-			created    time.Time
-			updated    time.Time
-			dbName     *string
+			dto       moduleDTO
+			id, orgID uuid.UUID
+			manifest  []byte
+			lastSeen  *time.Time
+			created   time.Time
+			updated   time.Time
+			dbName    *string
 		)
 		if err := rows.Scan(&id, &orgID, &dto.Slug, &dto.DisplayName, &dto.BaseURL,
 			&dto.Environment, &dto.Enabled, &dto.Status, &manifest, &lastSeen, &created, &updated, &dbName); err != nil {
