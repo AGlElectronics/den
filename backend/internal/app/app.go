@@ -58,6 +58,20 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 	defer pool.Close()
 	logger.Info().Msg("database connected")
 
+	if len(cfg.PreregisterModules) > 0 {
+		preCtx, cancelPre := context.WithTimeout(ctx, 30*time.Second)
+		res, err := httpx.PreregisterModules(preCtx, pool, cfg.PreregisterModules, logger)
+		cancelPre()
+		if err != nil {
+			return fmt.Errorf("pre-register modules: %w", err)
+		}
+		logger.Info().
+			Int("configured", len(cfg.PreregisterModules)).
+			Int("created", res.Created).
+			Int("already_present", res.Existing).
+			Msg("module pre-registration done")
+	}
+
 	// The compose S3 server (SeaweedFS) is DEV ONLY — see docs/adr/0003-minio-dev-only.md.
 	// In production S3_* must point at a real managed bucket; the files
 	// client code path is the same, just a different endpoint.

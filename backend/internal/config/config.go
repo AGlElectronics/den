@@ -68,6 +68,10 @@ type Config struct {
 	OperatorURL   string
 	OperatorToken string
 
+	// PreregisterModules are registered as unpaired at startup
+	// (DEN_PREREGISTER_MODULES). Existing modules are never changed.
+	PreregisterModules []PreregisteredModule
+
 	ShutdownTimeout time.Duration
 }
 
@@ -111,6 +115,12 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid config: TRUSTED_PROXY_CIDRS: %w", err)
 	}
 	cfg.TrustedProxyCIDRs = trusted
+
+	prereg, err := ParsePreregisterModules(getEnv("DEN_PREREGISTER_MODULES", ""))
+	if err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+	cfg.PreregisterModules = prereg
 
 	if err := cfg.validate(); err != nil {
 		return nil, err

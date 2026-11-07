@@ -13,6 +13,9 @@ same version. Rebuilds get no entry here.
 
 ### Added
 
+- `DEN_PREREGISTER_MODULES` lists modules (JSON) that Den registers as
+  unpaired at startup, so an admin only has to click Pair. Existing modules
+  are never changed.
 - `TRUSTED_PROXY_CIDRS` (optional): comma-separated CIDRs of the proxies in
   front of the backend whose `X-Forwarded-For` entries are believed. The
   default, `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128,fc00::/7`,
