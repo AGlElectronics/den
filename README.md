@@ -1,5 +1,11 @@
 # Den
 
+> [!WARNING]
+> ## **NOT READY FOR PRODUCTION**
+>
+> Con Services is under active development. Expect breaking changes, missing
+> features and bugs. Do not use it for real events or real data yet.
+
 Den is the portal and admin console of [Con Services](https://github.com/AGlElectronics/con-services).
 People land on Den's portal after signing in; administrators use it to
 connect modules (HR, Stash, Rally, …), set the organisation's branding and
