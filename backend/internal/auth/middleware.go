@@ -14,11 +14,18 @@ import (
 	"github.com/AGlElectronics/den/backend/internal/httperror"
 )
 
+// TokenVerifier verifies a bearer token from the web app and returns its
+// claims. *OIDCVerifier is the production implementation.
+type TokenVerifier interface {
+	Verify(ctx context.Context, bearer string) (*OIDCClaims, error)
+}
+
 // Middleware authenticates a human request. In dev mode, X-Dev-User (or the
 // default from DEV_DEFAULT_USER) is accepted and the user is provisioned on
 // the fly. In OIDC mode, the Authorization Bearer ID token is verified
-// against the configured issuer and the user is JIT-provisioned.
-func Middleware(cfg *config.Config, resolver *Resolver, oidcVerifier *OIDCVerifier) func(http.Handler) http.Handler {
+// against the configured issuer and the user is JIT-provisioned. Disabled
+// accounts (users.is_disabled) get 403.
+func Middleware(cfg *config.Config, resolver *Resolver, oidcVerifier TokenVerifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
@@ -30,6 +37,10 @@ func Middleware(cfg *config.Config, resolver *Resolver, oidcVerifier *OIDCVerifi
 					name = cfg.DevDefaultUser
 				}
 				user, err := resolver.LoadOrProvisionDevUser(ctx, name)
+				if errors.Is(err, ErrUserDisabled) {
+					httperror.Render(w, r, httperror.Forbidden("this account is disabled"))
+					return
+				}
 				if err != nil {
 					log.Ctx(ctx).Error().Err(err).Msg("dev auth failed")
 					httperror.Render(w, r, httperror.Internal(err))
@@ -54,6 +65,10 @@ func Middleware(cfg *config.Config, resolver *Resolver, oidcVerifier *OIDCVerifi
 					return
 				}
 				user, err := resolver.LoadOrProvisionOIDCUser(ctx, claims)
+				if errors.Is(err, ErrUserDisabled) {
+					httperror.Render(w, r, httperror.Forbidden("this account is disabled"))
+					return
+				}
 				if err != nil {
 					log.Ctx(ctx).Error().Err(err).Msg("oidc resolver failed")
 					httperror.Render(w, r, httperror.Internal(err))

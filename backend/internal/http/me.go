@@ -28,5 +28,6 @@ func meHandler(w http.ResponseWriter, r *http.Request) {
 		"issuer":       u.Issuer,
 		"subject":      u.Subject,
 		"memberships":  memberships,
+		"roles":        u.Roles(),
 	})
 }

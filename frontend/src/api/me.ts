@@ -12,6 +12,8 @@ export type Me = {
   issuer: string;
   subject: string;
   memberships: Membership[];
+  /** Every role: membership roles plus roles from IdP groups such as `ops`. */
+  roles?: string[];
 };
 
 export function fetchMe(): Promise<Me> {

@@ -79,7 +79,7 @@ type Deps struct {
 	Pool         *pgxpool.Pool
 	Logger       zerolog.Logger
 	Files        *files.Client
-	OIDCVerifier *auth.OIDCVerifier
+	OIDCVerifier auth.TokenVerifier
 	// KeycloakSync pushes branding into the realm; nil disables it.
 	KeycloakSync *KeycloakSync
 }
@@ -126,7 +126,11 @@ func NewRouter(deps Deps, version string) http.Handler {
 
 	// --- Handlers -------------------------------------------------------------
 
-	resolver := auth.NewResolver(deps.Pool, deps.Config.AdminGroups, deps.Config.MemberGroups)
+	resolver := auth.NewResolver(deps.Pool, auth.GroupConfig{
+		Admin:  deps.Config.AdminGroups,
+		Member: deps.Config.MemberGroups,
+		Ops:    deps.Config.OpsGroups,
+	})
 	authMW := auth.Middleware(deps.Config, resolver, deps.OIDCVerifier)
 
 	ops := newOpsClient(deps.Config.OperatorURL, deps.Config.OperatorToken)
@@ -152,7 +156,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 	// --- API --------------------------------------------------------------
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/health", health.health)
-		api.Get("/role-catalog", roleCatalogHandler(deps.Config.AdminGroups, deps.Config.MemberGroups))
+		api.Get("/role-catalog", roleCatalogHandler(deps.Config.AdminGroups, deps.Config.MemberGroups, deps.Config.OpsGroups))
 
 		api.Route("/v1", func(v1 chi.Router) {
 			// --- Integration (server-to-server) -------------------------
@@ -199,7 +203,18 @@ func NewRouter(deps Deps, version string) http.Handler {
 					admin.Put("/org-settings", settingsH.put)
 					admin.Get("/keycloak-sync", kcSync.getStatus)
 					admin.Post("/keycloak-sync", kcSync.syncNow)
-					admin.Route("/operations", opsH.routes)
+				})
+
+				// Backups, downloads, the schedule and database drops:
+				// the ops role only, admin alone is not enough. The
+				// read-only status (backup health, database list) is also
+				// shown to admins.
+				secure.Route("/operations", func(op chi.Router) {
+					op.With(auth.RequireRole(defaultOrgID, "admin", "owner", auth.RoleOps)).Get("/status", opsH.status)
+					op.Group(func(ops chi.Router) {
+						ops.Use(auth.RequireRole(defaultOrgID, auth.RoleOps))
+						opsH.routes(ops)
+					})
 				})
 			})
 		})

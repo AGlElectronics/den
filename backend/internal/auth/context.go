@@ -10,6 +10,11 @@ import (
 	"github.com/google/uuid"
 )
 
+// RoleOps may run backups, download them, change the backup schedule and
+// drop module databases. It comes from IdP groups on every request and is
+// never stored.
+const RoleOps = "ops"
+
 // Membership records that a user has a role within an organization.
 type Membership struct {
 	OrganizationID uuid.UUID
@@ -28,6 +33,11 @@ type User struct {
 	Subject string
 
 	Memberships []Membership
+	// RequestRoles are granted from IdP groups for this request only (for
+	// example RoleOps); Den serves a single organisation, so they apply to it.
+	RequestRoles []string
+	// Groups are the IdP groups from the token (empty in dev mode).
+	Groups []string
 }
 
 // HasRoleIn reports whether the user holds any of the given roles in the
@@ -35,6 +45,13 @@ type User struct {
 func (u *User) HasRoleIn(orgID uuid.UUID, roles ...string) bool {
 	if u == nil {
 		return false
+	}
+	for _, r := range roles {
+		for _, have := range u.RequestRoles {
+			if have == r {
+				return true
+			}
+		}
 	}
 	for _, m := range u.Memberships {
 		if m.OrganizationID != orgID {
@@ -47,6 +64,15 @@ func (u *User) HasRoleIn(orgID uuid.UUID, roles ...string) bool {
 		}
 	}
 	return false
+}
+
+// Roles lists every role the user holds: membership roles, then request roles.
+func (u *User) Roles() []string {
+	out := make([]string, 0, len(u.Memberships)+len(u.RequestRoles))
+	for _, m := range u.Memberships {
+		out = append(out, m.Role)
+	}
+	return append(out, u.RequestRoles...)
 }
 
 type ctxKey int

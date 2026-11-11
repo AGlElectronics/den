@@ -51,6 +51,9 @@ type Config struct {
 	// MemberGroups are the IdP groups whose members may use the portal.
 	// Empty means every signed-in user is a member.
 	MemberGroups []string
+	// OpsGroups are the IdP groups whose members may run backups, download
+	// them and drop module databases (DEN_OPS_GROUPS).
+	OpsGroups []string
 
 	CORSAllowedOrigins []string
 	// TrustedProxyCIDRs lists the proxies whose X-Forwarded-For entries are
@@ -98,6 +101,7 @@ func Load() (*Config, error) {
 		DevDefaultUser:     getEnv("DEV_DEFAULT_USER", "dev-admin"),
 		AdminGroups:        splitCSV(getEnv("DEN_ADMIN_GROUPS", "den-admin")),
 		MemberGroups:       splitCSV(getEnv("DEN_MEMBER_GROUPS", "den-member")),
+		OpsGroups:          splitCSV(getEnv("DEN_OPS_GROUPS", "den-ops")),
 		CORSAllowedOrigins: splitCSV(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3001")),
 		ShutdownTimeout:    getEnvDuration("SHUTDOWN_TIMEOUT", 15*time.Second),
 

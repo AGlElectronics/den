@@ -83,14 +83,15 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 	}
 	logger.Info().Str("bucket", filesClient.Bucket()).Msg("object storage ready")
 
-	var oidcVerifier *auth.OIDCVerifier
+	var oidcVerifier auth.TokenVerifier
 	if cfg.AuthMode == config.AuthModeOIDC {
 		oidcCtx, cancelOIDC := context.WithTimeout(ctx, 30*time.Second)
-		oidcVerifier, err = auth.NewOIDCVerifier(oidcCtx, cfg)
+		v, err := auth.NewOIDCVerifier(oidcCtx, cfg)
 		cancelOIDC()
 		if err != nil {
 			return fmt.Errorf("init oidc verifier: %w", err)
 		}
+		oidcVerifier = v
 		logger.Info().Str("issuer", cfg.OIDCIssuerURL).Msg("oidc verifier ready")
 	}
 

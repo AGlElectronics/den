@@ -320,6 +320,10 @@ func (h *moduleHandler) delete(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{"database_dropped": false}
 	note := "data kept"
 	if r.URL.Query().Get("database") == "drop" {
+		if u, _ := auth.FromContext(r.Context()); !u.HasRoleIn(defaultOrgID, auth.RoleOps) {
+			httperror.Render(w, r, httperror.Forbidden("deleting a module's database needs the ops role"))
+			return
+		}
 		if h.ops == nil {
 			httperror.Render(w, r, httperror.Conflict("Den doesn't manage databases in this installation"))
 			return

@@ -14,13 +14,17 @@ import {
   type BackupSettings,
   type OperationsStatus,
 } from '@/api/operations';
+import { useMe } from '@/hooks/useMe';
 import { cn } from '@/lib/cn';
+import { isOps } from '@/lib/roles';
 
 const card = 'rounded-lg border border-den-border bg-den-surface p-4 text-sm';
 const input = 'mt-1 w-full rounded-md border border-den-border bg-den-surface px-2 py-1';
 
 export function BackupsPage() {
   const qc = useQueryClient();
+  const me = useMe();
+  const ops = isOps(me.data);
   const status = useQuery({
     queryKey: ['operations-status'],
     queryFn: getOperationsStatus,
@@ -31,7 +35,7 @@ export function BackupsPage() {
   const backups = useQuery({
     queryKey: ['backups'],
     queryFn: listBackups,
-    enabled: !!ready?.backups_enabled,
+    enabled: ops && !!ready?.backups_enabled,
     refetchInterval: isRunning(s) ? 3_000 : 60_000,
   });
   const now = useMutation({
@@ -51,7 +55,7 @@ export function BackupsPage() {
             (Keycloak) and uploaded files. Backups are encrypted and kept in separate storage.
           </p>
         </div>
-        {ready?.backups_enabled && (
+        {ops && ready?.backups_enabled && (
           <button
             type="button"
             className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-den-primary px-3 py-2 text-den-on-primary hover:bg-den-primary-hover disabled:opacity-60"
@@ -71,6 +75,15 @@ export function BackupsPage() {
         </div>
       )}
       {now.isError && <p className="text-sm text-den-danger">{(now.error as Error).message}</p>}
+      {!ops && me.data && (
+        <p className="flex items-start gap-2 rounded-lg border border-den-border bg-den-surface p-3 text-sm text-den-foreground/80">
+          <Lock size={16} className="mt-0.5 shrink-0" />
+          <span>
+            You can see the backup status, but running, scheduling and downloading backups needs the{' '}
+            <strong>ops</strong> role (the <code>den-ops</code> group by default).
+          </span>
+        </p>
+      )}
 
       {status.isLoading ? (
         <p className="text-sm text-den-foreground/60">Loading…</p>
@@ -91,11 +104,11 @@ export function BackupsPage() {
       ) : (
         <>
           {ready && <Overview s={ready} />}
-          {ready?.backups_enabled && ready.settings && (
+          {ops && ready?.backups_enabled && ready.settings && (
             <ScheduleCard settings={ready.settings} timezone={ready.timezone} />
           )}
           {ready && <DatabasesCard s={ready} />}
-          {ready?.backups_enabled && <BackupList backups={backups.data} loading={backups.isLoading} />}
+          {ops && ready?.backups_enabled && <BackupList backups={backups.data} loading={backups.isLoading} />}
           <section className={card}>
             <h2 className="font-heading text-base font-bold">Restoring</h2>
             <p className="mt-1 text-den-foreground/70">

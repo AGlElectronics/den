@@ -125,8 +125,8 @@ type downloadLink struct {
 	expires time.Time
 }
 
+// routes are the ops-only routes; /status is mounted by the router.
 func (h *operationsHandler) routes(r chi.Router) {
-	r.Get("/status", h.status)
 	r.Put("/settings", h.settings)
 	r.Get("/backups", h.list)
 	r.Post("/backups", h.backupNow)
