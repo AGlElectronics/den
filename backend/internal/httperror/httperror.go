@@ -22,6 +22,7 @@ const (
 	CodeConflict     Code = "conflict"
 	CodeInternal     Code = "internal"
 	CodeUnavailable  Code = "unavailable"
+	CodeRateLimited  Code = "rate_limited"
 )
 
 // Error is the canonical service error type.
@@ -76,6 +77,12 @@ func Validation(msg string, d any) *Error {
 // Unavailable is a dependency (e.g. the operator) failing; msg is shown.
 func Unavailable(msg string) *Error { return New(CodeUnavailable, msg) }
 
+// RateLimited is a client calling a route too often; Retry-After says when
+// to try again.
+func RateLimited() *Error {
+	return New(CodeRateLimited, "too many requests, try again later")
+}
+
 func Internal(cause error) *Error {
 	return New(CodeInternal, "internal server error").WithCause(cause)
 }
@@ -121,6 +128,8 @@ func statusFor(code Code) int {
 		return http.StatusConflict
 	case CodeUnavailable:
 		return http.StatusBadGateway
+	case CodeRateLimited:
+		return http.StatusTooManyRequests
 	default:
 		return http.StatusInternalServerError
 	}

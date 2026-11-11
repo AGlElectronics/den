@@ -67,7 +67,9 @@ import (
 	"github.com/AGlElectronics/den/backend/internal/auth"
 	"github.com/AGlElectronics/den/backend/internal/clientip"
 	"github.com/AGlElectronics/den/backend/internal/config"
+	"github.com/AGlElectronics/den/backend/internal/httperror"
 	"github.com/AGlElectronics/den/backend/internal/keycloak"
+	"github.com/AGlElectronics/den/backend/internal/ratelimit"
 )
 
 // Deps groups the runtime dependencies the HTTP layer needs. The server
@@ -81,6 +83,33 @@ type Deps struct {
 	OIDCVerifier auth.TokenVerifier
 	// KeycloakSync pushes branding into the realm; nil disables it.
 	KeycloakSync *KeycloakSync
+	// NewLimiter builds the limiter of one rate-limited route; nil uses an
+	// in-process ratelimit.Memory.
+	NewLimiter func(route string, limit int, window time.Duration) ratelimit.Limiter
+}
+
+// Rate limits per client IP on the routes that need no sign-in.
+var rateLimits = map[string]struct {
+	limit  int
+	window time.Duration
+}{
+	"pairing-redeem":  {10, time.Minute},
+	"public-brand":    {120, time.Minute},
+	"backup-download": {10, time.Minute},
+}
+
+// limitRoute is the rate-limit hook of one route.
+func limitRoute(deps Deps, route string) func(http.Handler) http.Handler {
+	rl := rateLimits[route]
+	var l ratelimit.Limiter
+	if deps.NewLimiter != nil {
+		l = deps.NewLimiter(route, rl.limit, rl.window)
+	} else {
+		l = ratelimit.NewMemory(rl.limit, rl.window)
+	}
+	return ratelimit.Middleware(l,
+		func(r *http.Request) string { return clientip.FromRequest(r) },
+		func(w http.ResponseWriter, r *http.Request) { httperror.Render(w, r, httperror.RateLimited()) })
 }
 
 // NewRouter wires the chi router with middleware, CORS and routes.
@@ -165,7 +194,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 			// pairing token in the query string. Everything else under
 			// /integrations/* is bearer-authenticated.
 			v1.Route("/integrations", func(integ chi.Router) {
-				integ.Post("/pairing/redeem", pairH.redeem)
+				integ.With(limitRoute(deps, "pairing-redeem")).Post("/pairing/redeem", pairH.redeem)
 
 				integ.Group(func(bearer chi.Router) {
 					bearer.Use(moduleAuth)
@@ -178,9 +207,9 @@ func NewRouter(deps Deps, version string) http.Handler {
 			})
 
 			// --- Public: login screens need the brand before sign-in ----
-			v1.Route("/public", brandH.publicRoutes(settingsH))
+			v1.With(limitRoute(deps, "public-brand")).Route("/public", brandH.publicRoutes(settingsH))
 			// One-time backup download links minted by an admin.
-			v1.Get("/backup-downloads/{token}", opsH.download)
+			v1.With(limitRoute(deps, "backup-download")).Get("/backup-downloads/{token}", opsH.download)
 
 			// --- Human UI (dev header or OIDC) --------------------------
 			v1.Group(func(secure chi.Router) {
