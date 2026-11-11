@@ -2,78 +2,84 @@ package http
 
 import (
 	"context"
-	"encoding/json"
 	"html"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
+	"github.com/AGlElectronics/den/backend/internal/audit"
+	"github.com/AGlElectronics/den/backend/internal/config"
 	"github.com/AGlElectronics/den/backend/internal/keycloak"
 )
 
-// Den orchestrates the Keycloak login look the same way it brands paired
-// modules: it pushes the brand into the realm (login theme, display name and
-// the conservicesBrand attribute, which the conservices login theme renders).
-// Keycloak never needs to know where Den lives.
+// The Keycloak sign-in page PULLS its look from Den: the conservices login
+// theme fetches GET /api/v1/public/brand in the browser (see
+// docs/adr/0008-keycloak-branding-pull.md), so Den needs no write access to
+// the realm for it. The one thing a browser cannot fetch is the realm's
+// display name, which Keycloak puts into its own e-mails and page titles.
+// When a Keycloak admin client is configured, Den keeps that in line with the
+// organisation name (realm-management manage-realm; Keycloak has no smaller
+// role that allows it). In identity mode "existing" the realm belongs to the
+// convention and Den never writes to it.
 
 const (
-	loginThemeName      = "conservices"
-	loginBrandAttribute = "conservicesBrand"
-	keycloakResync      = 5 * time.Minute
-	keycloakRetry       = 15 * time.Second
+	keycloakResync = 5 * time.Minute
+	keycloakRetry  = 15 * time.Second
 )
 
-// loginBrand is what the login theme reads from the realm attribute.
-type loginBrand struct {
-	Revision         int             `json:"revision"`
-	OrganizationName string          `json:"organization_name"`
-	Tagline          string          `json:"tagline,omitempty"`
-	Theme            json.RawMessage `json:"theme"`
-	LogoURL          string          `json:"logo_url,omitempty"`
-	FaviconURL       string          `json:"favicon_url,omitempty"`
-	BackgroundURL    string          `json:"background_url,omitempty"`
-	LoginLayout      string          `json:"login_layout,omitempty"`
-	LoginCaption     string          `json:"login_caption,omitempty"`
-}
-
 type keycloakSyncStatus struct {
-	Enabled   bool       `json:"enabled"`
-	Realm     string     `json:"realm,omitempty"`
-	Revision  int        `json:"revision,omitempty"`
-	SyncedAt  *time.Time `json:"synced_at,omitempty"`
-	LastError string     `json:"last_error,omitempty"`
+	Enabled bool `json:"enabled"`
+	// Mode is how the sign-in page gets the brand: always "pull".
+	Mode string `json:"mode"`
+	// Message explains why the display-name sync is off, when it is.
+	Message     string     `json:"message,omitempty"`
+	Realm       string     `json:"realm,omitempty"`
+	Revision    int        `json:"revision,omitempty"`
+	DisplayName string     `json:"display_name,omitempty"`
+	SyncedAt    *time.Time `json:"synced_at,omitempty"`
+	LastError   string     `json:"last_error,omitempty"`
 }
 
-// KeycloakSync keeps the realm's login branding in line with Den.
+// KeycloakSync keeps the realm's display name in line with Den.
 type KeycloakSync struct {
-	kc        *keycloak.Client // nil = not configured
-	brand     *brandingHandler
-	settings  *orgSettingsHandler
-	publicURL string
-	log       zerolog.Logger
-	kick      chan struct{}
+	kc       *keycloak.Client // nil = not configured or not allowed
+	pool     *pgxpool.Pool
+	brand    *brandingHandler
+	settings *orgSettingsHandler
+	log      zerolog.Logger
+	kick     chan struct{}
 
-	mu     sync.Mutex
-	status keycloakSyncStatus
+	mu       sync.Mutex
+	status   keycloakSyncStatus
+	lastName string
+	lastOK   *bool
 }
 
-// NewKeycloakSync returns a syncer; with an unconfigured client it is a no-op
-// that reports enabled=false. publicURL is Den's browser-facing base URL.
-func NewKeycloakSync(pool *pgxpool.Pool, filesClient AssetStore, cfg keycloak.Config, publicURL string, log zerolog.Logger) *KeycloakSync {
+// NewKeycloakSync returns a syncer. Without a configured client, or in
+// identity mode existing, it is a no-op that reports enabled=false with the
+// reason.
+func NewKeycloakSync(pool *pgxpool.Pool, cfg keycloak.Config, identityMode string, log zerolog.Logger) *KeycloakSync {
 	s := &KeycloakSync{
-		brand:     newBrandingHandler(pool, filesClient),
-		settings:  &orgSettingsHandler{pool: pool},
-		publicURL: strings.TrimRight(publicURL, "/"),
-		log:       log,
-		kick:      make(chan struct{}, 1),
+		pool:     pool,
+		brand:    newBrandingHandler(pool, nil),
+		settings: &orgSettingsHandler{pool: pool},
+		log:      log,
+		kick:     make(chan struct{}, 1),
+		status:   keycloakSyncStatus{Mode: "pull"},
 	}
-	if cfg.Enabled() {
+	switch {
+	case identityMode == config.IdentityExisting:
+		s.status.Message = "Off because IDENTITY_STAFF_MODE is existing: the realm belongs to your convention and Den never changes it. " +
+			"Its sign-in page shows Den's brand only if the conservices login theme is installed there."
+	case !cfg.Enabled():
+		s.status.Message = "The sign-in page fetches the brand from Den by itself. Set KEYCLOAK_ADMIN_URL and KEYCLOAK_CLIENT_SECRET " +
+			"only if Keycloak's e-mails should also use the organisation name."
+	default:
 		s.kc = keycloak.New(cfg)
-		s.status = keycloakSyncStatus{Enabled: true, Realm: cfg.Realm}
+		s.status.Enabled, s.status.Realm = true, cfg.Realm
 	}
 	return s
 }
@@ -86,7 +92,7 @@ func (s *KeycloakSync) Run(ctx context.Context) {
 	}
 	for {
 		wait := keycloakResync
-		if err := s.Sync(ctx); err != nil {
+		if err := s.Sync(ctx, false); err != nil {
 			wait = keycloakRetry
 		}
 		t := time.NewTimer(wait)
@@ -118,66 +124,60 @@ func (s *KeycloakSync) Status() keycloakSyncStatus {
 	return s.status
 }
 
-// Sync pushes the current brand to the realm once.
-func (s *KeycloakSync) Sync(ctx context.Context) error {
+// Sync pushes the display name once. manual marks an admin's "Sync now",
+// which is always audited; background syncs are audited when the pushed
+// name or the outcome changes.
+func (s *KeycloakSync) Sync(ctx context.Context, manual bool) error {
 	if s.kc == nil {
 		return nil
 	}
-	revision, err := s.push(ctx)
+	revision, name, err := s.push(ctx)
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	ok := err == nil
+	changed := s.lastOK == nil || *s.lastOK != ok || (ok && name != s.lastName)
+	s.lastOK = &ok
 	if err != nil {
 		s.status.LastError = err.Error()
-		s.log.Warn().Err(err).Str("realm", s.kc.Realm()).Msg("keycloak brand sync failed")
-		return err
+		s.log.Warn().Err(err).Str("realm", s.kc.Realm()).Msg("keycloak display name sync failed")
+	} else {
+		now := time.Now().UTC()
+		s.status.SyncedAt, s.status.Revision, s.status.DisplayName, s.status.LastError = &now, revision, name, ""
+		s.lastName = name
 	}
-	now := time.Now().UTC()
-	s.status.SyncedAt, s.status.Revision, s.status.LastError = &now, revision, ""
-	return nil
+	s.mu.Unlock()
+
+	if (manual || changed) && s.pool != nil {
+		ev := audit.Event{
+			OrgID: orgRef(), Action: "keycloak.sync", EntityType: "organization", EntityID: defaultOrgID,
+			After: map[string]any{"realm": s.kc.Realm(), "display_name": name, "ok": ok, "manual": manual},
+		}
+		if err != nil {
+			ev.Note = err.Error()
+		}
+		if aerr := audit.Write(context.WithoutCancel(ctx), s.pool, ev); aerr != nil {
+			s.log.Warn().Err(aerr).Msg("keycloak sync audit event failed")
+		}
+	}
+	return err
 }
 
-func (s *KeycloakSync) push(ctx context.Context) (int, error) {
+func (s *KeycloakSync) push(ctx context.Context) (int, string, error) {
 	st, err := s.settings.load(ctx, defaultOrgID)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	b, err := s.brand.bundle(ctx, defaultOrgID, st.Data)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
-	lb := loginBrand{Revision: b.Revision, OrganizationName: b.OrganizationName, Theme: b.Theme}
-	var copyMap map[string]any
-	_ = json.Unmarshal(b.Copy, &copyMap)
-	if t, ok := copyMap["tagline"].(string); ok {
-		lb.Tagline = strings.TrimSpace(t)
-	}
-	if t, ok := copyMap["login_layout"].(string); ok {
-		lb.LoginLayout = strings.TrimSpace(t)
-	}
-	if t, ok := copyMap["login_caption"].(string); ok {
-		lb.LoginCaption = strings.TrimSpace(t)
-	}
-	asset := func(role string) string {
-		id, ok := b.Assets[role]
-		if !ok {
-			return ""
-		}
-		return s.publicURL + "/api/v1/public/brand/assets/" + role + "?v=" + id
-	}
-	lb.LogoURL, lb.FaviconURL, lb.BackgroundURL = asset("logo"), asset("favicon"), asset(assetLoginBackground)
-	attr, err := json.Marshal(lb)
-	if err != nil {
-		return 0, err
+	if b.OrganizationName == "" {
+		return b.Revision, "", nil
 	}
 	rep := map[string]any{
-		"loginTheme": loginThemeName,
-		"attributes": map[string]string{loginBrandAttribute: string(attr)},
+		"displayName":     b.OrganizationName,
+		"displayNameHtml": html.EscapeString(b.OrganizationName),
 	}
-	if b.OrganizationName != "" {
-		rep["displayName"] = b.OrganizationName
-		rep["displayNameHtml"] = html.EscapeString(b.OrganizationName)
-	}
-	return b.Revision, s.kc.UpdateRealm(ctx, rep)
+	return b.Revision, b.OrganizationName, s.kc.UpdateRealm(ctx, rep)
 }
 
 func (s *KeycloakSync) getStatus(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +186,8 @@ func (s *KeycloakSync) getStatus(w http.ResponseWriter, r *http.Request) {
 
 // syncNow is POST /keycloak-sync: sync synchronously and report the result.
 func (s *KeycloakSync) syncNow(w http.ResponseWriter, r *http.Request) {
-	_ = s.Sync(r.Context())
+	if s.kc != nil {
+		_ = s.Sync(r.Context(), true)
+	}
 	writeJSON(w, http.StatusOK, s.Status())
 }

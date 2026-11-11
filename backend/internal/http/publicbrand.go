@@ -29,8 +29,10 @@ type brandBundle struct {
 	Copy             json.RawMessage `json:"copy"`
 	// Assets maps a role ("logo", "favicon", …) to the newest asset id.
 	Assets map[string]string `json:"assets"`
-	// LogoURL and LoginBackgroundURL are relative to Den (public endpoint).
+	// LogoURL, FaviconURL and LoginBackgroundURL are relative to Den
+	// (public endpoint).
 	LogoURL            string `json:"logo_url,omitempty"`
+	FaviconURL         string `json:"favicon_url,omitempty"`
 	LoginBackgroundURL string `json:"login_background_url,omitempty"`
 }
 
@@ -72,6 +74,9 @@ func (h *brandingHandler) bundle(ctx context.Context, orgID uuid.UUID, settings 
 	if _, ok := out.Assets["logo"]; ok {
 		out.LogoURL = "/api/v1/public/brand/assets/logo"
 	}
+	if id, ok := out.Assets["favicon"]; ok {
+		out.FaviconURL = "/api/v1/public/brand/assets/favicon?v=" + id
+	}
 	if id, ok := out.Assets[assetLoginBackground]; ok {
 		out.LoginBackgroundURL = "/api/v1/public/brand/assets/" + assetLoginBackground + "?v=" + id
 	}
@@ -91,8 +96,22 @@ func (h *brandingHandler) bundle(ctx context.Context, orgID uuid.UUID, settings 
 	return out, nil
 }
 
+// allowAnyOrigin lets any web page read the public brand without
+// credentials: the Keycloak login theme fetches it from another origin. An
+// origin from CORS_ALLOWED_ORIGINS keeps the credentialed answer the CORS
+// middleware already set.
+func allowAnyOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if w.Header().Get("Access-Control-Allow-Origin") == "" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (h *brandingHandler) publicRoutes(settings *orgSettingsHandler) func(chi.Router) {
 	return func(r chi.Router) {
+		r.Use(allowAnyOrigin)
 		r.Get("/brand", func(w http.ResponseWriter, req *http.Request) {
 			s, err := settings.load(req.Context(), defaultOrgID)
 			if err != nil {
@@ -147,7 +166,7 @@ func (h *brandingHandler) integrationBundle(settings *orgSettingsHandler) http.H
 			httperror.Render(w, r, err)
 			return
 		}
-		b.LogoURL, b.LoginBackgroundURL = "", ""
+		b.LogoURL, b.FaviconURL, b.LoginBackgroundURL = "", "", ""
 		writeJSON(w, http.StatusOK, map[string]any{"brand": b, "settings": s})
 	}
 }

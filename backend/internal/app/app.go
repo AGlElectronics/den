@@ -95,14 +95,16 @@ func Run(ctx context.Context, logger zerolog.Logger) error {
 		logger.Info().Str("issuer", cfg.OIDCIssuerURL).Msg("oidc verifier ready")
 	}
 
-	kcSync := httpx.NewKeycloakSync(pool, filesClient, keycloak.Config{
+	kcSync := httpx.NewKeycloakSync(pool, keycloak.Config{
 		BaseURL:      cfg.KeycloakAdminURL,
 		Realm:        cfg.KeycloakRealm,
 		ClientID:     cfg.KeycloakClientID,
 		ClientSecret: cfg.KeycloakClientSecret,
-	}, cfg.AppBaseURL, logger)
+	}, cfg.IdentityStaffMode, logger)
 	if kcSync.Status().Enabled {
-		logger.Info().Str("realm", cfg.KeycloakRealm).Msg("keycloak login branding sync enabled")
+		logger.Info().Str("realm", cfg.KeycloakRealm).Msg("keycloak display name sync enabled")
+	} else {
+		logger.Info().Str("identity_staff_mode", cfg.IdentityStaffMode).Msg("keycloak display name sync off; the login theme pulls the brand")
 	}
 	syncCtx, stopSync := context.WithCancel(ctx)
 	defer stopSync()

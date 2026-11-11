@@ -171,7 +171,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 	auditH := &auditHandler{pool: deps.Pool}
 	kcSync := deps.KeycloakSync
 	if kcSync == nil {
-		kcSync = NewKeycloakSync(deps.Pool, deps.Files, keycloak.Config{}, "", deps.Logger)
+		kcSync = NewKeycloakSync(deps.Pool, keycloak.Config{}, deps.Config.IdentityStaffMode, deps.Logger)
 	}
 	brandH.onChange = kcSync.Trigger
 	settingsH.onChange = kcSync.Trigger

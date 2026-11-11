@@ -24,6 +24,13 @@ const (
 	AuthModeDev  AuthMode = "dev"
 )
 
+// Staff identity modes (IDENTITY_STAFF_MODE).
+const (
+	IdentityOwn      = "own"
+	IdentityBrokered = "brokered"
+	IdentityExisting = "existing"
+)
+
 // Config holds every setting the backend reads.
 type Config struct {
 	AppEnv      string
@@ -60,8 +67,15 @@ type Config struct {
 	// believed when working out the client IP (TRUSTED_PROXY_CIDRS).
 	TrustedProxyCIDRs []netip.Prefix
 
-	// Keycloak admin access for pushing login branding into the realm.
-	// Disabled unless KEYCLOAK_ADMIN_URL and KEYCLOAK_CLIENT_SECRET are set.
+	// IdentityStaffMode is where staff accounts live (IDENTITY_STAFF_MODE):
+	// own (our realm, default), brokered (our realm, linked to the
+	// convention's IdP) or existing (the convention's realm, which Den never
+	// changes).
+	IdentityStaffMode string
+
+	// Keycloak admin access for pushing the realm display name (used in
+	// Keycloak's e-mails). Disabled unless KEYCLOAK_ADMIN_URL and
+	// KEYCLOAK_CLIENT_SECRET are set, and always in IdentityStaffMode existing.
 	KeycloakAdminURL     string
 	KeycloakRealm        string
 	KeycloakClientID     string
@@ -110,6 +124,7 @@ func Load() (*Config, error) {
 		CORSAllowedOrigins: splitCSV(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3001")),
 		ShutdownTimeout:    getEnvDuration("SHUTDOWN_TIMEOUT", 15*time.Second),
 
+		IdentityStaffMode:    getEnv("IDENTITY_STAFF_MODE", IdentityOwn),
 		KeycloakAdminURL:     getEnv("KEYCLOAK_ADMIN_URL", ""),
 		KeycloakClientID:     getEnv("KEYCLOAK_CLIENT_ID", "den-keycloak"),
 		KeycloakClientSecret: getEnv("KEYCLOAK_CLIENT_SECRET", ""),
@@ -160,6 +175,11 @@ func (c *Config) validate() error {
 	}
 	if c.S3SecretAccessKey == "" {
 		errs = append(errs, "S3_SECRET_ACCESS_KEY is required")
+	}
+	switch c.IdentityStaffMode {
+	case IdentityOwn, IdentityBrokered, IdentityExisting:
+	default:
+		errs = append(errs, fmt.Sprintf("IDENTITY_STAFF_MODE must be own, brokered or existing, got %q", c.IdentityStaffMode))
 	}
 	if n := len(c.CredentialKey); n > 0 && n < 32 {
 		errs = append(errs, "DEN_CREDENTIAL_KEY must be at least 32 characters (for example: openssl rand -hex 32)")

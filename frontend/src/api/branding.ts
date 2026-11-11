@@ -47,11 +47,18 @@ export function deleteBrandingAsset(id: string): Promise<void> {
   return apiRequest<void>(`/api/v1/brand/assets/${id}`, { method: 'DELETE' });
 }
 
-/** Den pushes the brand into the Keycloak realm so the sign-in page matches. */
+/**
+ * The sign-in page pulls the brand from Den; Den only keeps the realm's display
+ * name in line (optional, off in identity mode `existing`).
+ */
 export type KeycloakSyncStatus = {
   enabled: boolean;
+  mode: 'pull';
+  /** Why the display-name sync is off, when it is. */
+  message?: string;
   realm?: string;
   revision?: number;
+  display_name?: string;
   synced_at?: string;
   last_error?: string;
 };

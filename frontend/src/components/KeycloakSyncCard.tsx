@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { getKeycloakSync, syncKeycloakNow } from '@/api/branding';
 
-/** Status of the brand push into Keycloak (the sign-in page). */
+/** How the Keycloak sign-in page gets the brand, and the optional display-name sync. */
 export function KeycloakSyncCard() {
   const qc = useQueryClient();
   const status = useQuery({ queryKey: ['keycloak-sync'], queryFn: getKeycloakSync, refetchInterval: 15_000 });
@@ -18,8 +18,8 @@ export function KeycloakSyncCard() {
         <div>
           <h2 className="font-heading text-base font-bold">Sign-in page (Keycloak)</h2>
           <p className="text-den-foreground/70">
-            Den pushes the organisation name, tagline, logo, favicon, colours and sign-in background into Keycloak whenever branding or
-            organisation settings change, and re-checks every few minutes.
+            The <code>conservices</code> login theme fetches the organisation name, tagline, logo, favicon, colours and
+            sign-in background from Den each time the page opens, so changes show up straight away.
           </p>
         </div>
         {s?.enabled && (
@@ -29,26 +29,26 @@ export function KeycloakSyncCard() {
             disabled={sync.isPending}
             onClick={() => sync.mutate()}
           >
-            {sync.isPending ? 'Syncing…' : 'Sync now'}
+            {sync.isPending ? 'Syncing…' : 'Sync name now'}
           </button>
         )}
       </div>
-      <div className="mt-2">
+      <div className="mt-2" data-testid="keycloak-sync-status">
         {status.isLoading ? (
           <p className="text-den-foreground/60">Loading…</p>
         ) : !s?.enabled ? (
           <p className="text-den-foreground/70">
-            Not connected. Set <code>KEYCLOAK_ADMIN_URL</code> and <code>KEYCLOAK_CLIENT_SECRET</code> on the Den backend.
+            Realm name sync is off.{s?.message ? ` ${s.message}` : ''}
           </p>
         ) : s.last_error ? (
-          <p className="text-den-danger">Last sync failed: {s.last_error}</p>
+          <p className="text-den-danger">Last realm name sync failed: {s.last_error}</p>
         ) : s.synced_at ? (
           <p className="text-den-foreground/70">
-            Realm <span className="font-mono">{s.realm}</span> is on revision {s.revision}, synced{' '}
-            {new Date(s.synced_at).toLocaleString()}.
+            Realm <span className="font-mono">{s.realm}</span> is named <strong>{s.display_name}</strong> (used in
+            Keycloak&apos;s e-mails), synced {new Date(s.synced_at).toLocaleString()}.
           </p>
         ) : (
-          <p className="text-den-foreground/70">Waiting for the first sync…</p>
+          <p className="text-den-foreground/70">Waiting for the first realm name sync…</p>
         )}
       </div>
     </section>

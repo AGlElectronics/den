@@ -1,7 +1,7 @@
-// Package keycloak is Den's minimal Keycloak admin client: Den pushes the
-// organisation's branding into the realm so the login pages match the suite.
-// Authenticates with a confidential client's service account
-// (realm-management: manage-realm).
+// Package keycloak is Den's minimal Keycloak admin client. Den only uses it
+// to keep the realm's display name equal to the organisation name (the login
+// theme pulls the rest of the brand from Den itself). Authenticates with a
+// confidential client's service account (realm-management: manage-realm).
 package keycloak
 
 import (
