@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/AGlElectronics/den/backend/internal/audit"
 	"github.com/AGlElectronics/den/backend/internal/auth"
 	"github.com/AGlElectronics/den/backend/internal/httperror"
 )
@@ -105,12 +106,31 @@ func (h *orgSettingsHandler) put(w http.ResponseWriter, r *http.Request) {
 	if id := auth.ActorID(r.Context()); id != nil {
 		actor = id.String()
 	}
-	if _, err := h.pool.Exec(r.Context(), `
-		INSERT INTO organization_settings (organization_id, data, updated_at, updated_by)
-		VALUES ($1, $2, now(), $3)
-		ON CONFLICT (organization_id) DO UPDATE
-		   SET data = EXCLUDED.data, updated_at = now(), updated_by = EXCLUDED.updated_by
-	`, defaultOrgID, buf, actor); err != nil {
+	err = auth.WithTx(r.Context(), h.pool, func(tx pgx.Tx) error {
+		var before []byte
+		err := tx.QueryRow(r.Context(),
+			`SELECT data FROM organization_settings WHERE organization_id = $1 FOR UPDATE`, defaultOrgID).Scan(&before)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if _, err := tx.Exec(r.Context(), `
+			INSERT INTO organization_settings (organization_id, data, updated_at, updated_by)
+			VALUES ($1, $2, now(), $3)
+			ON CONFLICT (organization_id) DO UPDATE
+			   SET data = EXCLUDED.data, updated_at = now(), updated_by = EXCLUDED.updated_by
+		`, defaultOrgID, buf, actor); err != nil {
+			return err
+		}
+		var beforeDoc any
+		if len(before) > 0 {
+			beforeDoc = json.RawMessage(before)
+		}
+		return audit.Write(r.Context(), tx, audit.Event{
+			OrgID: orgRef(), Action: "org_settings.update", EntityType: "organization", EntityID: defaultOrgID,
+			Before: beforeDoc, After: json.RawMessage(buf),
+		})
+	})
+	if err != nil {
 		httperror.Render(w, r, httperror.Internal(err))
 		return
 	}

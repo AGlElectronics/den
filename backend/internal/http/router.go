@@ -134,7 +134,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 
 	ops := newOpsClient(deps.Config.OperatorURL, deps.Config.OperatorToken)
 	modH := newModuleHandler(deps.Pool, ops, deps.Config.IsDevelopment())
-	opsH := &operationsHandler{ops: ops}
+	opsH := &operationsHandler{ops: ops, pool: deps.Pool}
 	brandH := newBrandingHandler(deps.Pool, deps.Files)
 	pairH := newPairingHandler(deps.Pool, deps.Config.AppBaseURL, deps.Config.CredentialKey)
 	settingsH := &orgSettingsHandler{pool: deps.Pool}
