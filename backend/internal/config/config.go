@@ -67,6 +67,11 @@ type Config struct {
 	KeycloakClientID     string
 	KeycloakClientSecret string
 
+	// CredentialKey derives module credentials so Den can present them when
+	// it calls a module (DEN_CREDENTIAL_KEY, at least 32 bytes). Empty: Den
+	// does not call modules (no portal to-dos).
+	CredentialKey []byte
+
 	// The internal operator (module databases + backups). Off when empty.
 	OperatorURL   string
 	OperatorToken string
@@ -111,6 +116,7 @@ func Load() (*Config, error) {
 
 		OperatorURL:   strings.TrimRight(getEnv("OPERATOR_URL", ""), "/"),
 		OperatorToken: getEnv("OPERATOR_TOKEN", ""),
+		CredentialKey: []byte(getEnv("DEN_CREDENTIAL_KEY", "")),
 	}
 	cfg.KeycloakRealm = getEnv("KEYCLOAK_REALM", realmFromIssuer(cfg.OIDCIssuerURL))
 
@@ -150,6 +156,9 @@ func (c *Config) validate() error {
 	}
 	if c.S3SecretAccessKey == "" {
 		errs = append(errs, "S3_SECRET_ACCESS_KEY is required")
+	}
+	if n := len(c.CredentialKey); n > 0 && n < 32 {
+		errs = append(errs, "DEN_CREDENTIAL_KEY must be at least 32 characters (for example: openssl rand -hex 32)")
 	}
 	if c.OperatorURL != "" && c.OperatorToken == "" {
 		errs = append(errs, "OPERATOR_TOKEN is required when OPERATOR_URL is set")

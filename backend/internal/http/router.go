@@ -137,9 +137,10 @@ func NewRouter(deps Deps, version string) http.Handler {
 	modH := newModuleHandler(deps.Pool, ops)
 	opsH := &operationsHandler{ops: ops}
 	brandH := newBrandingHandler(deps.Pool, deps.Files)
-	pairH := newPairingHandler(deps.Pool, deps.Config.AppBaseURL)
+	pairH := newPairingHandler(deps.Pool, deps.Config.AppBaseURL, deps.Config.CredentialKey)
 	settingsH := &orgSettingsHandler{pool: deps.Pool}
 	prefsH := &preferencesHandler{pool: deps.Pool}
+	auditH := &auditHandler{pool: deps.Pool}
 	kcSync := deps.KeycloakSync
 	if kcSync == nil {
 		kcSync = NewKeycloakSync(deps.Pool, deps.Files, keycloak.Config{}, "", deps.Logger)
@@ -197,12 +198,14 @@ func NewRouter(deps Deps, version string) http.Handler {
 					admin.Route("/modules", func(sub chi.Router) {
 						modH.routes(sub)
 						sub.Post("/{id}/pairing-tokens", pairH.mintToken)
+						sub.Route("/{id}/credentials", pairH.credentialRoutes)
 					})
 					admin.Route("/brand", brandH.humanRoutes)
 					admin.Get("/org-settings", settingsH.get)
 					admin.Put("/org-settings", settingsH.put)
 					admin.Get("/keycloak-sync", kcSync.getStatus)
 					admin.Post("/keycloak-sync", kcSync.syncNow)
+					admin.Get("/audit-events", auditH.list)
 				})
 
 				// Backups, downloads, the schedule and database drops:

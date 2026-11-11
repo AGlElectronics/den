@@ -33,6 +33,12 @@ func decodeJSON(r *http.Request, dst any) error {
 	return nil
 }
 
+// orgRef is defaultOrgID as the audit_events.organization_id value.
+func orgRef() *uuid.UUID {
+	id := defaultOrgID
+	return &id
+}
+
 func parseUUIDParam(r *http.Request, name string) (uuid.UUID, error) {
 	raw := chi.URLParam(r, name)
 	id, err := uuid.Parse(raw)
