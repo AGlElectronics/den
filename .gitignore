@@ -25,9 +25,5 @@ frontend/.rsbuild/
 frontend/coverage/
 frontend/.env
 frontend/.env.local
-
-# sqlc-generated (regenerated in CI / Dockerfile)
-backend/internal/repository/sqlcgen/
-
 # Misc
 *.log

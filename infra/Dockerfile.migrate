@@ -3,25 +3,12 @@ FROM golang:1.27.3-alpine3.24 AS build
 WORKDIR /src
 ENV CGO_ENABLED=0 GOFLAGS=-buildvcs=false
 
-ARG SQLC_VERSION=v1.30.0
-RUN apk add --no-cache wget ca-certificates tar && \
-    arch="$(uname -m)" && \
-    case "$arch" in \
-        x86_64) sqlc_arch=amd64 ;; \
-        aarch64) sqlc_arch=arm64 ;; \
-        *) echo "unsupported architecture $arch" >&2; exit 1 ;; \
-    esac && \
-    ver="${SQLC_VERSION#v}" && \
-    wget -qO- "https://github.com/sqlc-dev/sqlc/releases/download/${SQLC_VERSION}/sqlc_${ver}_linux_${sqlc_arch}.tar.gz" \
-        | tar -xz -C /usr/local/bin sqlc
-
 COPY backend/go.mod backend/go.sum ./
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
 COPY backend ./
-RUN rm -rf internal/repository/sqlcgen && sqlc generate
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \

@@ -1,6 +1,6 @@
 // Package auth attaches the authenticated principal to each request. The
 // human UI uses either dev-header or OIDC auth (see middleware.go). The
-// integration API uses a module credential (see bearer.go).
+// integration API uses a module credential (ModuleBearerMiddleware).
 package auth
 
 import (

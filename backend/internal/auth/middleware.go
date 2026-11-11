@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 
 	"github.com/AGlElectronics/den/backend/internal/config"
@@ -149,8 +148,3 @@ func RequireRole(orgID uuid.UUID, roles ...string) func(http.Handler) http.Handl
 		})
 	}
 }
-
-// Compile-time guard: a *pgxpool.Pool is not itself a ModuleResolver — the
-// real one lives in internal/pairing. This blank reference keeps the import
-// used so re-adding a pool-backed resolver later needs no `go mod` churn.
-var _ = (*pgxpool.Pool)(nil)

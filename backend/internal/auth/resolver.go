@@ -12,14 +12,12 @@ import (
 )
 
 // defaultOrgID matches the seed row in migrations/20260101000001_init.sql.
-// MVP binds every new dev user to this org as `admin`. Multi-tenant
-// provisioning will replace this with a role_assignments lookup.
+// Den serves exactly one organisation; roles in it come from IdP groups
+// (docs/adr/0007-roles-from-idp-groups.md).
 var defaultOrgID = uuid.MustParse("00000000-0000-0000-0000-00000000d001")
 
 // Resolver loads users (or provisions them if missing) from the users /
-// external_identities tables. It is deliberately pgxpool-driven rather than
-// sqlc-driven so the scaffold builds without a `sqlc generate` step; the
-// queries themselves are tiny and stable.
+// external_identities tables.
 type Resolver struct {
 	pool         *pgxpool.Pool
 	adminGroups  []string
