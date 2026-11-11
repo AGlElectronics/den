@@ -36,8 +36,11 @@ export type LostFound =
   | { mode: 'deleted_after_closing'; hours?: number };
 
 export type TasksSettings = {
-  retention?: { trash_days?: number; notification_days?: number; audit_days?: number; automation_run_days?: number };
-  reminders?: { due_soon_days?: number };
+  trash_days?: number;
+  notification_days?: number;
+  audit_days?: number;
+  automation_run_days?: number;
+  due_soon_days?: number;
 };
 
 export type ModuleSettingsData = {

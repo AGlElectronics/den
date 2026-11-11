@@ -197,8 +197,8 @@ MAJOR is the MAJOR every module is built for
   [module settings contract](https://aglelectronics.github.io/con-services/concepts/module-settings/).
   The bundle and `GET /api/v1/integrations/module-settings` send
   `{"data": {…}, "updated_at": "…"}` with `finance.seller`,
-  `stash.lost_found`, `wiki.revision_retention_days`, `tasks.retention`,
-  `tasks.reminders` and `rally.submission_site_host`. `PUT
+  `stash.lost_found`, `wiki.revision_retention_days`, `tasks.trash_days`,
+  `tasks.due_soon_days` and `rally.submission_site_host`. `PUT
   /api/v1/module-settings` takes `{"data": {…}}`; the old unwrapped
   document is `400`. The SMTP password is no longer in the bundle: modules
   read `smtp.password_set` and fetch the value from `GET

@@ -31,7 +31,7 @@ import (
 //	finance         — slug "finance"
 //	stash           — slug "stash"
 //	wiki            — slug "wiki"
-//	tasks           — slug "tasks"
+//	tasks           — slug "tasks" (tasks.trash_days, tasks.due_soon_days, …)
 //	rally           — slug "events" or "rally"
 //
 // identity is Den's own (links on the portal) and is never sent. The SMTP
@@ -97,20 +97,12 @@ type wikiSettings struct {
 	RevisionRetentionDays *int `json:"revision_retention_days,omitempty"`
 }
 
-type tasksRetention struct {
+type tasksSettings struct {
 	TrashDays         *int `json:"trash_days,omitempty"`
 	NotificationDays  *int `json:"notification_days,omitempty"`
 	AuditDays         *int `json:"audit_days,omitempty"`
 	AutomationRunDays *int `json:"automation_run_days,omitempty"`
-}
-
-type tasksReminders struct {
-	DueSoonDays *int `json:"due_soon_days,omitempty"`
-}
-
-type tasksSettings struct {
-	Retention *tasksRetention `json:"retention,omitempty"`
-	Reminders *tasksReminders `json:"reminders,omitempty"`
+	DueSoonDays       *int `json:"due_soon_days,omitempty"`
 }
 
 type rallySettings struct {
@@ -286,15 +278,11 @@ func (h *moduleSettingsHandler) normalize(d *moduleSettingsDoc) (fields map[stri
 		days("wiki.revision_retention_days", w.RevisionRetentionDays)
 	}
 	if t := d.Tasks; t != nil {
-		if r := t.Retention; r != nil {
-			days("tasks.retention.trash_days", r.TrashDays)
-			days("tasks.retention.notification_days", r.NotificationDays)
-			days("tasks.retention.audit_days", r.AuditDays)
-			days("tasks.retention.automation_run_days", r.AutomationRunDays)
-		}
-		if r := t.Reminders; r != nil {
-			intIn("tasks.reminders.due_soon_days", r.DueSoonDays, 0, 30)
-		}
+		days("tasks.trash_days", t.TrashDays)
+		days("tasks.notification_days", t.NotificationDays)
+		days("tasks.audit_days", t.AuditDays)
+		days("tasks.automation_run_days", t.AutomationRunDays)
+		intIn("tasks.due_soon_days", t.DueSoonDays, 0, 30)
 	}
 	if r := d.Rally; r != nil {
 		if r.SubmissionSiteHost = trimPtr(r.SubmissionSiteHost); r.SubmissionSiteHost != nil {

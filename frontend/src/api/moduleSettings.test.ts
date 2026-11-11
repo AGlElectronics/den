@@ -25,13 +25,13 @@ describe('compactSettings', () => {
       compactSettings({
         finance: { seller: { legal_name: 'Example Con e.V.', vat_id: 'ATU12345678' } },
         stash: { lost_found: { mode: 'deleted_after_closing', hours: 48 } },
-        tasks: { retention: { trash_days: 30 }, reminders: { due_soon_days: 2 } },
+        tasks: { trash_days: 30, due_soon_days: 2 },
         wiki: { revision_retention_days: 365 },
       }),
     ).toEqual({
       finance: { seller: { legal_name: 'Example Con e.V.', vat_id: 'ATU12345678' } },
       stash: { lost_found: { mode: 'deleted_after_closing', hours: 48 } },
-      tasks: { retention: { trash_days: 30 }, reminders: { due_soon_days: 2 } },
+      tasks: { trash_days: 30, due_soon_days: 2 },
       wiki: { revision_retention_days: 365 },
     });
   });

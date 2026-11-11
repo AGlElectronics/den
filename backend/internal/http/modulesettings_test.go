@@ -26,13 +26,13 @@ func TestModuleSettings(t *testing.T) {
 		"finance":   map[string]any{"seller": map[string]any{"vat_id": "123", "country": "Austria", "email": "x", "website": "ftp://x"}},
 		"stash":     map[string]any{"lost_found": map[string]any{"mode": "forever"}},
 		"wiki":      map[string]any{"revision_retention_days": -5},
-		"tasks":     map[string]any{"reminders": map[string]any{"due_soon_days": 31}},
+		"tasks":     map[string]any{"due_soon_days": 31},
 		"rally":     map[string]any{"submission_site_host": "https://submit.example.org"},
 		"identity":  map[string]any{"account_console_url": "ftp://x"},
 	}}), http.StatusUnprocessableEntity).json(t, &bad)
 	for _, k := range []string{"retention.inactive_users_days", "smtp.host", "smtp.port", "smtp.from", "smtp.security",
 		"finance.seller.vat_id", "finance.seller.country", "finance.seller.email", "finance.seller.website",
-		"stash.lost_found.mode", "wiki.revision_retention_days", "tasks.reminders.due_soon_days",
+		"stash.lost_found.mode", "wiki.revision_retention_days", "tasks.due_soon_days",
 		"rally.submission_site_host", "identity.account_console_url"} {
 		if bad.Error.Details[k] == "" {
 			t.Errorf("missing error for %s: %v", k, bad.Error.Details)
@@ -49,7 +49,7 @@ func TestModuleSettings(t *testing.T) {
 			"country": "at", "vat_id": "atu 1234 5678", "email": "finance@example.org", "website": "https://example.org"}},
 		"stash":    map[string]any{"lost_found": map[string]any{"mode": "deleted_after_closing", "days": 9}},
 		"wiki":     map[string]any{"revision_retention_days": 365},
-		"tasks":    map[string]any{"retention": map[string]any{"trash_days": 30}, "reminders": map[string]any{"due_soon_days": 1}},
+		"tasks":    map[string]any{"trash_days": 30, "due_soon_days": 1},
 		"rally":    map[string]any{"submission_site_host": "submit.example.org"},
 		"identity": map[string]any{"account_console_url": "https://auth.example.org/realms/conservices/account", "sso_name": "Example SSO", "idp_admin_console_url": "https://auth.example.org/admin/master/console/#/conservices"},
 	}
@@ -212,6 +212,34 @@ func TestModuleSettingsMigrationKeepsOldValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{`"seller": {"vat_id": "ATU1", "legal_name": "Old e.V."}`, `"lost_found": {"days": 10, "mode": "kept_after_con"}`, `"retention": {"inactive_users_days": 5}`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("migrated data %s lacks %s", got, want)
+		}
+	}
+}
+
+func TestTasksSettingsMigrationFlattensKeys(t *testing.T) {
+	e := newEnv(t, nil)
+	t.Cleanup(func() { _, _ = e.pool.Exec(context.Background(), `DELETE FROM module_settings`) })
+	ctx := context.Background()
+	if _, err := e.pool.Exec(ctx, `
+		INSERT INTO module_settings (organization_id, data) VALUES ($1, $2)
+		ON CONFLICT (organization_id) DO UPDATE SET data = EXCLUDED.data`, testOrgID,
+		`{"tasks":{"trash_days":7,"retention":{"trash_days":30,"audit_days":730},"reminders":{"due_soon_days":1}}}`); err != nil {
+		t.Fatal(err)
+	}
+	sql := migrationUp(t, "20261111000007_tasks_settings_flat.sql")
+	if _, err := e.pool.Exec(ctx, sql); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := e.pool.QueryRow(ctx, `SELECT data::text FROM module_settings WHERE organization_id = $1`, testOrgID).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "retention") || strings.Contains(got, "reminders") {
+		t.Fatalf("nested tasks keys remain: %s", got)
+	}
+	for _, want := range []string{`"trash_days": 7`, `"audit_days": 730`, `"due_soon_days": 1`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("migrated data %s lacks %s", got, want)
 		}

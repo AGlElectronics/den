@@ -11,7 +11,6 @@ import {
   type ModuleSettingsData,
   type SellerSettings,
   type SmtpSecurity,
-  type TasksSettings,
 } from '@/api/moduleSettings';
 
 const input = 'mt-1 w-full rounded-md border border-den-border bg-den-surface px-2 py-1';
@@ -70,8 +69,6 @@ export function ModuleSettingsPage() {
   const seller: SellerSettings = d.finance?.seller ?? {};
   const setSeller = (patch: Partial<SellerSettings>) =>
     setD((cur) => ({ ...cur, finance: { ...(cur.finance ?? {}), seller: { ...(cur.finance?.seller ?? {}), ...patch } } }));
-  const setTasks = <K extends keyof TasksSettings>(part: K, patch: Partial<NonNullable<TasksSettings[K]>>) =>
-    setD((cur) => ({ ...cur, tasks: { ...(cur.tasks ?? {}), [part]: { ...(cur.tasks?.[part] ?? {}), ...patch } } }));
 
   return (
     <form
@@ -252,14 +249,14 @@ export function ModuleSettingsPage() {
               ['automation_run_days', 'Automation runs (days)', 'Automation run history is kept this long. 0 = forever.'],
             ] as const
           ).map(([key, label, hint]) => (
-            <Field key={key} label={label} hint={hint} error={errors[`tasks.retention.${key}`]}>
-              <input className={input} inputMode="numeric" value={d.tasks?.retention?.[key] ?? ''}
-                onChange={(e) => setTasks('retention', { [key]: num(e.target.value) })} />
+            <Field key={key} label={label} hint={hint} error={errors[`tasks.${key}`]}>
+              <input className={input} inputMode="numeric" value={d.tasks?.[key] ?? ''}
+                onChange={(e) => set('tasks', { [key]: num(e.target.value) })} />
             </Field>
           ))}
-          <Field label="Due-soon reminder (days before)" hint="0 = no reminders, at most 30." error={errors['tasks.reminders.due_soon_days']}>
-            <input className={input} inputMode="numeric" value={d.tasks?.reminders?.due_soon_days ?? ''}
-              onChange={(e) => setTasks('reminders', { due_soon_days: num(e.target.value) })} />
+          <Field label="Due-soon reminder (days before)" hint="0 = no reminders, at most 30." error={errors['tasks.due_soon_days']}>
+            <input className={input} inputMode="numeric" value={d.tasks?.due_soon_days ?? ''}
+              onChange={(e) => set('tasks', { due_soon_days: num(e.target.value) })} />
           </Field>
         </div>
       </section>
@@ -275,7 +272,8 @@ export function ModuleSettingsPage() {
       <section className={card}>
         <h2 className="font-heading text-base font-bold">Identity links</h2>
         <p className="text-xs text-den-foreground/60">
-          Links shown in Den and the modules. The admin console link replaces the Keycloak link Den used to guess from the
+          Links shown in Den (the menu and the portal). Modules do not receive these.
+          The admin console link replaces the Keycloak link Den used to guess from the
           sign-in address.
         </p>
         <div className="grid gap-3 md:grid-cols-2">
