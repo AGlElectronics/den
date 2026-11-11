@@ -11,8 +11,10 @@ import {
   KeyRound,
   LogOut,
   Palette,
+  ScrollText,
   Settings,
   Shield,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 import { fetchDashboard } from '@/api/dashboard';
@@ -23,29 +25,17 @@ import { cn } from '@/lib/cn';
 import { useThemeSync } from '@/lib/theme';
 import { isOidcAuthMode, signOutOidc } from '@/auth/oidc';
 import { ThemeToggle } from '@/components/ThemeToggle';
-import { runtimeConfig } from '@/runtime-config';
 
 const NAV = [
   { to: '/admin', label: 'Overview', icon: Gauge, exact: true },
   { to: '/admin/modules', label: 'Modules', icon: Boxes },
   { to: '/admin/branding', label: 'Branding', icon: Palette },
   { to: '/admin/organization', label: 'Organisation', icon: Building2 },
+  { to: '/admin/module-settings', label: 'Module settings', icon: SlidersHorizontal },
   { to: '/admin/backups', label: 'Backups', icon: DatabaseBackup },
+  { to: '/admin/audit', label: 'Audit log', icon: ScrollText },
   { to: '/admin/settings', label: 'Settings', icon: Settings },
 ] as const;
-
-/** Keycloak's admin console on this realm, derived from the OIDC issuer. */
-function keycloakConsoleURL(): string | undefined {
-  const authority = runtimeConfig().oidcAuthority;
-  if (!authority) return undefined;
-  try {
-    const u = new URL(authority);
-    const realm = u.pathname.split('/realms/')[1]?.split('/')[0];
-    return realm ? `${u.origin}/admin/master/console/#/${realm}` : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 /**
  * Admin console shell. Deliberately looks different from the member portal
@@ -59,7 +49,8 @@ export function AdminLayout() {
   useThemeSync('/api/v1/me/preferences');
   const ops = useQuery({ queryKey: ['operations-status'], queryFn: getOperationsStatus, refetchInterval: 60_000 });
   const problem = backupProblem(ops.data);
-  const kcConsole = keycloakConsoleURL();
+  const links = dash.data?.identity_links;
+  const idpConsole = links?.idp_admin_console_url;
 
   const convention =
     dash.data?.copy?.convention_name || dash.data?.organization?.display_name || 'Den';
@@ -96,16 +87,16 @@ export function AdminLayout() {
               </Link>
             );
           })}
-          {kcConsole && (
+          {idpConsole && (
             <a
-              href={kcConsole}
+              href={idpConsole}
               target="_blank"
               rel="noopener noreferrer"
-              title="Accounts, groups and sign-in settings. Sign in with the Keycloak administrator account."
+              title="Accounts, groups and sign-in settings (Module settings → Identity links)."
               className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-slate-300 hover:bg-white/5 hover:text-white"
             >
               <KeyRound size={16} />
-              Keycloak
+              {links?.sso_name ? `${links.sso_name} admin` : 'Identity provider'}
               <ExternalLink size={12} className="ml-auto opacity-60" />
             </a>
           )}

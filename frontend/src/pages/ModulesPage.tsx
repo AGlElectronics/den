@@ -1,20 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
-import { AlertTriangle, Copy, Database, Key, Loader2, Plus, Trash2 } from 'lucide-react';
+import { Copy, Database, Key, KeyRound, Pencil, Plus, Trash2 } from 'lucide-react';
 
 import {
   createModule,
-  deleteModule,
   listModules,
   mintPairingToken,
   type CreatedDatabase,
   type Module,
   type PairingToken,
+  type PortalVisibility,
   type RemoveModuleResult,
 } from '@/api/modules';
-import { formatBytes, getOperationsStatus, type ServerDatabase } from '@/api/operations';
+import { formatBytes, getOperationsStatus } from '@/api/operations';
+import { EditModuleDialog } from '@/components/EditModuleDialog';
+import { ModuleCredentials } from '@/components/ModuleCredentials';
+import { RemoveModuleDialog } from '@/components/RemoveModuleDialog';
+import { useMe } from '@/hooks/useMe';
 import { cn } from '@/lib/cn';
+import { isOps } from '@/lib/roles';
 
 export function ModulesPage() {
   const qc = useQueryClient();
@@ -29,11 +34,17 @@ export function ModulesPage() {
   const [displayName, setDisplayName] = useState('');
   const [baseURL, setBaseURL] = useState('');
   const [environment, setEnvironment] = useState('production');
+  const [internalURL, setInternalURL] = useState('');
+  const [visibility, setVisibility] = useState<PortalVisibility>('role_holders');
   const [withDatabase, setWithDatabase] = useState(true);
+  const me = useMe();
+  const hasOps = isOps(me.data);
 
   const [lastToken, setLastToken] = useState<PairingToken | null>(null);
   const [newDatabase, setNewDatabase] = useState<CreatedDatabase | null>(null);
   const [removing, setRemoving] = useState<Module | null>(null);
+  const [editing, setEditing] = useState<Module | null>(null);
+  const [credentialsOf, setCredentialsOf] = useState<Module | null>(null);
   const [removed, setRemoved] = useState<{ name: string; result: RemoveModuleResult } | null>(null);
 
   const create = useMutation({
@@ -43,6 +54,8 @@ export function ModulesPage() {
       setSlug('');
       setDisplayName('');
       setBaseURL('');
+      setInternalURL('');
+      setVisibility('role_holders');
       setEnvironment('production');
       setNewDatabase(res.database ?? null);
       void qc.invalidateQueries({ queryKey: ['modules'] });
@@ -83,6 +96,8 @@ export function ModulesPage() {
               slug: slug.trim(),
               display_name: displayName.trim(),
               base_url: baseURL.trim(),
+              internal_url: internalURL.trim() || undefined,
+              portal_visibility: visibility,
               environment: environment.trim() || 'production',
               create_database: managed && withDatabase,
             });
@@ -122,6 +137,26 @@ export function ModulesPage() {
               value={environment}
               onChange={(e) => setEnvironment(e.target.value)}
             />
+          </label>
+          <label className="text-sm md:col-span-2">
+            Server address (optional)
+            <input
+              className="mt-1 w-full rounded-md border border-den-border px-2 py-1"
+              value={internalURL}
+              placeholder="https://tickets-backend.conservices-tickets.svc.cluster.local:8080"
+              onChange={(e) => setInternalURL(e.target.value)}
+            />
+          </label>
+          <label className="text-sm md:col-span-2">
+            Shown on the portal to
+            <select
+              className="mt-1 w-full rounded-md border border-den-border px-2 py-1"
+              value={visibility}
+              onChange={(e) => setVisibility(e.target.value as PortalVisibility)}
+            >
+              <option value="role_holders">People with a role in the module</option>
+              <option value="everyone">Every member</option>
+            </select>
           </label>
           {managed && (
             <label className="md:col-span-4 flex items-start gap-2 text-sm">
@@ -166,6 +201,7 @@ export function ModulesPage() {
 
       {newDatabase && <DatabaseCallout db={newDatabase} onDismiss={() => setNewDatabase(null)} />}
       {lastToken && <PairingTokenCallout token={lastToken} onDismiss={() => setLastToken(null)} />}
+      {credentialsOf && <ModuleCredentials module={credentialsOf} onClose={() => setCredentialsOf(null)} />}
       {removed && (
         <div className="rounded-lg border border-den-border bg-den-surface p-4 text-sm">
           <div className="flex items-start justify-between gap-4">
@@ -256,6 +292,20 @@ export function ModulesPage() {
                     </button>
                     <button
                       type="button"
+                      className="inline-flex items-center gap-1 text-den-foreground/80 hover:text-den-foreground"
+                      onClick={() => setCredentialsOf(m)}
+                    >
+                      <KeyRound size={14} /> Credentials
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-den-foreground/80 hover:text-den-foreground"
+                      onClick={() => setEditing(m)}
+                    >
+                      <Pencil size={14} /> Edit
+                    </button>
+                    <button
+                      type="button"
                       className="inline-flex items-center gap-1 text-den-danger hover:opacity-80"
                       onClick={() => setRemoving(m)}
                     >
@@ -281,6 +331,7 @@ export function ModulesPage() {
           module={removing}
           database={managed ? databases.get(removing.database) : undefined}
           backupsEnabled={!!ready?.backups_enabled}
+          ops={hasOps}
           onClose={() => setRemoving(null)}
           onRemoved={(result) => {
             setRemoved({ name: removing.display_name, result });
@@ -293,146 +344,16 @@ export function ModulesPage() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-/**
- * Two warnings before data is deleted: first the choice (delete the data or
- * keep it), then typing the module's short name.
- */
-function RemoveModuleDialog({
-  module: m,
-  database,
-  backupsEnabled,
-  onClose,
-  onRemoved,
-}: {
-  module: Module;
-  database?: ServerDatabase;
-  backupsEnabled: boolean;
-  onClose: () => void;
-  onRemoved: (r: RemoveModuleResult) => void;
-}) {
-  const canDrop = !!database && !database.protected;
-  const [choice, setChoice] = useState<'drop' | 'keep'>(canDrop ? 'drop' : 'keep');
-  const [step, setStep] = useState<1 | 2>(1);
-  const [typed, setTyped] = useState('');
-  const remove = useMutation({
-    mutationFn: () => deleteModule(m.id, choice === 'drop' ? { confirm: typed } : undefined),
-    onSuccess: onRemoved,
-  });
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
-      <div className="w-full max-w-lg space-y-4 rounded-lg border border-den-border bg-den-surface p-5 text-sm shadow-xl">
-        {step === 1 ? (
-          <>
-            <h2 className="font-heading text-lg font-bold">Remove {m.display_name}?</h2>
-            <p className="text-den-foreground/80">
-              It is disconnected from Den straight away: it stops receiving branding and settings and its pairing is
-              revoked. Uploaded files are not touched.
-            </p>
-            <div className="space-y-2">
-              {canDrop && (
-                <label
-                  className={cn(
-                    'flex cursor-pointer items-start gap-2 rounded-md border p-3',
-                    choice === 'drop' ? 'border-den-danger-border bg-den-danger-bg' : 'border-den-border',
-                  )}
-                >
-                  <input type="radio" className="mt-1" checked={choice === 'drop'} onChange={() => setChoice('drop')} />
-                  <span>
-                    <span className="font-medium">Remove and delete its data</span>
-                    <span className="block text-den-foreground/70">
-                      Its database <span className="font-mono">{database.name}</span> (
-                      {formatBytes(database.size_bytes)}) and everything in it is permanently deleted.
-                      {backupsEnabled ? ' A backup is made first.' : ' Backups are turned off, so no backup is made.'}
-                    </span>
-                  </span>
-                </label>
-              )}
-              <label
-                className={cn(
-                  'flex cursor-pointer items-start gap-2 rounded-md border p-3',
-                  choice === 'keep' ? 'border-den-primary' : 'border-den-border',
-                )}
-              >
-                <input type="radio" className="mt-1" checked={choice === 'keep'} onChange={() => setChoice('keep')} />
-                <span>
-                  <span className="font-medium">Remove only, keep its data</span>
-                  <span className="block text-den-foreground/70">
-                    {database
-                      ? 'The database stays on the server, so the module can be added and paired again later.'
-                      : 'Den has no database for this module; whatever it stores is left alone.'}
-                  </span>
-                </span>
-              </label>
-            </div>
-            <div className="flex justify-end gap-2">
-              <button type="button" className="rounded-md border border-den-border px-3 py-2" onClick={onClose}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="rounded-md bg-den-danger px-3 py-2 text-white hover:opacity-90"
-                onClick={() => (choice === 'drop' ? setStep(2) : remove.mutate())}
-                disabled={remove.isPending}
-              >
-                {choice === 'drop' ? 'Continue' : remove.isPending ? 'Removing…' : `Remove ${m.display_name}`}
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <h2 className="flex items-center gap-2 font-heading text-lg font-bold text-den-danger">
-              <AlertTriangle size={18} /> Delete {m.display_name}&apos;s data?
-            </h2>
-            <p className="text-den-foreground/80">
-              This is the second and last warning. The database <span className="font-mono">{database?.name}</span>{' '}
-              is deleted and anyone still using {m.display_name} is disconnected.{' '}
-              {backupsEnabled
-                ? 'The backup made first is the only way to get the data back.'
-                : 'There is no backup: the data is gone for good.'}
-            </p>
-            <label className="block">
-              Type <span className="font-mono font-semibold">{m.slug}</span> to confirm
-              <input
-                className="mt-1 w-full rounded-md border border-den-border bg-den-surface px-2 py-1 font-mono"
-                value={typed}
-                autoComplete="off"
-                data-1p-ignore="true"
-                data-lpignore="true"
-                onChange={(e) => setTyped(e.target.value)}
-              />
-            </label>
-            {remove.isError && <p className="text-den-danger">{(remove.error as Error).message}</p>}
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                className="rounded-md border border-den-border px-3 py-2"
-                onClick={onClose}
-                disabled={remove.isPending}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 rounded-md bg-den-danger px-3 py-2 text-white hover:opacity-90 disabled:opacity-50"
-                disabled={typed !== m.slug || remove.isPending}
-                onClick={() => remove.mutate()}
-              >
-                {remove.isPending && <Loader2 size={14} className="animate-spin" />}
-                {remove.isPending
-                  ? backupsEnabled
-                    ? 'Backing up and deleting…'
-                    : 'Deleting…'
-                  : `Delete ${m.display_name} and its data`}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
+      {editing && (
+        <EditModuleDialog
+          module={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            void qc.invalidateQueries({ queryKey: ['modules'] });
+          }}
+        />
+      )}
     </div>
   );
 }

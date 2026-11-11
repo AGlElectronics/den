@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { Boxes, Palette, Settings } from 'lucide-react';
+import { Boxes, Palette, ScrollText, Settings, SlidersHorizontal } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 
 import { fetchDashboard } from '@/api/dashboard';
@@ -16,6 +16,18 @@ const TOOLS = [
     title: 'Branding',
     description: 'Colours, fonts and portal copy, with a live preview.',
     icon: Palette,
+  },
+  {
+    to: '/admin/module-settings',
+    title: 'Module settings',
+    description: 'Retention, e-mail, Finance, Stash, Rally and identity links for paired modules.',
+    icon: SlidersHorizontal,
+  },
+  {
+    to: '/admin/audit',
+    title: 'Audit log',
+    description: 'Who changed what, and when.',
+    icon: ScrollText,
   },
   {
     to: '/admin/settings',

@@ -30,6 +30,12 @@ export type DashboardHome = {
     typography: Record<string, unknown>;
     copy: Record<string, unknown>;
   };
+  /** Links from Den → Module settings → Identity; the IdP admin console only for admins. */
+  identity_links?: {
+    account_console_url?: string;
+    sso_name?: string;
+    idp_admin_console_url?: string;
+  };
   /** The modules this person may use (admins: every usable module). */
   usable_modules: UsableModule[];
   /** Organisation-wide counts, only sent to admins. */

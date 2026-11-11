@@ -16,6 +16,8 @@ import { BrandingPage } from '@/pages/BrandingPage';
 import { OrgSettingsPage } from '@/pages/OrgSettingsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { BackupsPage } from '@/pages/BackupsPage';
+import { AuditLogPage } from '@/pages/AuditLogPage';
+import { ModuleSettingsPage } from '@/pages/ModuleSettingsPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { OidcCallbackPage } from '@/pages/OidcCallbackPage';
 import { fetchMe } from '@/api/me';
@@ -159,6 +161,18 @@ const adminBackupsRoute = createRoute({
   component: BackupsPage,
 });
 
+const adminModuleSettingsRoute = createRoute({
+  getParentRoute: () => adminLayoutRoute,
+  path: '/admin/module-settings',
+  component: ModuleSettingsPage,
+});
+
+const adminAuditRoute = createRoute({
+  getParentRoute: () => adminLayoutRoute,
+  path: '/admin/audit',
+  component: AuditLogPage,
+});
+
 const adminSettingsRoute = createRoute({
   getParentRoute: () => adminLayoutRoute,
   path: '/admin/settings',
@@ -175,6 +189,8 @@ const routeTree = rootRoute.addChildren([
     adminBrandingRoute,
     adminOrgSettingsRoute,
     adminBackupsRoute,
+    adminModuleSettingsRoute,
+    adminAuditRoute,
     adminSettingsRoute,
   ]),
 ]);

@@ -42,7 +42,19 @@ export function Layout() {
               </Link>
             ) : null}
             <ThemeToggle compact />
-            <span className="hidden text-den-foreground/70 sm:inline">{me.data?.display_name ?? '…'}</span>
+            {dash.data?.identity_links?.account_console_url ? (
+              <a
+                href={dash.data.identity_links.account_console_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hidden text-den-foreground/70 hover:text-den-primary sm:inline"
+                title="Password and two-factor sign-in"
+              >
+                {me.data?.display_name ?? '…'}
+              </a>
+            ) : (
+              <span className="hidden text-den-foreground/70 sm:inline">{me.data?.display_name ?? '…'}</span>
+            )}
             {isOidcAuthMode() && (
               <button
                 type="button"
