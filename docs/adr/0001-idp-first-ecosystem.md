@@ -40,11 +40,12 @@ That is the wrong shape for us:
 
 ## Consequences
 
-- Den has an OIDC verifier (stubbed in the MVP; see
-  `backend/internal/auth/oidc.go`) but no user-managed password UI.
-- The organization can swap IdPs by changing `OIDC_ISSUER_URL` and seeding
-  a new `role_assignments` binding — users will be re-matched on next
-  login via `(new_issuer, same_group_name) → same role`.
+- Den has an OIDC verifier (`backend/internal/auth/oidc.go`) but no
+  user-managed password UI.
+- The organization can swap IdPs by changing `OIDC_ISSUER_URL` and creating
+  the same group names in the new IdP: roles come from groups named in
+  Den's environment ([ADR 0007](0007-roles-from-idp-groups.md)). People
+  are new users under the new issuer.
 - A Stash deployment can run with zero Den dependency. Branding, in that
   case, lives in Stash's own small `branding.json` instead of being
   fetched from Den.

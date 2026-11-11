@@ -31,17 +31,29 @@ Den instance, we need:
   module_slug}`. The module may discover `module_id` from `/api/v1/me`
   on Den, or it can be provided by the pairing UI — up to the module.
 - Den validates: token hash exists, not expired, not consumed, `module_id`
-  (if provided) matches the row's `module_id`. On success, Den:
-  1. Marks the token consumed.
-  2. Mints a `module_credential` (opaque random string, 32 bytes b64url).
-  3. Stores only the SHA-256 hash of the credential.
-  4. Writes an `audit_events` row (`pairing.redeem`).
-  5. Returns `{credential, module_id, organization_id, den_base_url}`.
+  and `module_slug` (if provided) match the token's module (409 otherwise;
+  the token stays unused). A body that is not valid JSON, or has unknown
+  fields, is refused with 400. On success, Den, in **one transaction** that
+  locks the token row:
+  1. Marks the token consumed (`... WHERE consumed_at IS NULL`, and checks
+     that exactly one row changed), so concurrent redeems of one URL yield
+     exactly one credential.
+  2. Revokes every older credential of the module.
+  3. Mints a `module_credential` (32 bytes b64url; with `DEN_CREDENTIAL_KEY`
+     derived as HMAC-SHA256 of its id, so Den can present it to the module).
+  4. Stores only the SHA-256 hash of the credential.
+  5. Writes an `audit_events` row (`pairing.token.redeem`) with the admin who
+     minted the token as the actor.
+  6. Returns `{credential, credential_id, module_id, organization_id, den_base_url}`.
 - The module stores the credential in its own secret store and uses it as
   `Authorization: Bearer <credential>` for every subsequent call to
   `/api/v1/integrations/branding/...`.
-- Credentials can be revoked by setting `revoked_at`. Revoked credentials
-  are refused at the middleware.
+- Credentials can be revoked by setting `revoked_at`, by an admin in
+  Modules → Credentials (`DELETE /api/v1/modules/{id}/credentials[/{credentialID}]`).
+  Revoked credentials are refused at the middleware (401). A module left
+  without an active credential is `unpaired`.
+- Pairing is always a manual admin action. Den never re-pairs a module by
+  itself, and a module that gets 401 must tell its admin to pair again.
 
 ## Consequences
 
@@ -50,5 +62,8 @@ Den instance, we need:
 - We never give any module AWS/S3 credentials. The module reads branding
   bytes via Den's integration API, which authenticates with the module
   credential; see [0004-one-bucket-per-module.md](0004-one-bucket-per-module.md).
-- Rotation = mint a new credential and revoke the old one. No UI pain
-  because the module's own admin UI handles pairing again.
+- Rotation = pair again: the new credential replaces every older one in
+  the same transaction. No UI pain because the module's own admin UI
+  handles pairing again.
+- Token minting and redeem are audited; the redeem endpoint is
+  rate-limited per client IP (10 a minute).

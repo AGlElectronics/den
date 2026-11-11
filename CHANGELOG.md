@@ -25,9 +25,49 @@ MAJOR is the MAJOR every module is built for
 - Organisation settings, a JSON document paired modules read and show as
   "Managed in Den", including `wiki_public_links`, and a public brand
   bundle for sign-in screens that can be read from other origins.
-- Den pushes its branding into the Keycloak realm (login theme, display name
-  and the `conservicesBrand` attribute), with status and "Sync now" on the
-  Branding page.
+- The Keycloak sign-in page follows Den's brand: the `conservices` login
+  theme fetches it from Den's public brand endpoint in the browser (set
+  `DEN_PUBLIC_URL` on Keycloak), so Den needs no write access to the realm
+  for it. Optionally Den keeps the realm's display name (used in Keycloak's
+  e-mails) equal to the organisation name, shown with "Sync name now" on
+  the Branding page; see
+  [ADR 0008](docs/adr/0008-keycloak-branding-pull.md).
+- `IDENTITY_STAFF_MODE` (`own`, `brokered` or `existing`, default `own`):
+  with `existing` Den never writes to the realm and the Branding page says
+  why the name sync is off.
+- `ops` role for backups and database deletion (`DEN_OPS_GROUPS`, default
+  `den-ops`), published in the role catalog next to `admin` and `member`.
+  Running, scheduling and downloading backups and deleting a module's
+  database need it; admins without it see the backup status only. See
+  [ADR 0007](docs/adr/0007-roles-from-idp-groups.md).
+- Modules → **Credentials**: list a module's pairing credentials and revoke
+  one or all of them (`GET/DELETE /api/v1/modules/{id}/credentials`,
+  `DELETE /api/v1/modules/{id}/credentials/{credentialID}`). A module
+  without an active credential becomes unpaired; pairing it again is always
+  a manual admin action.
+- Modules → **Edit**: name, address, server address (`internal_url`, where
+  Den calls the module), environment, on/off, and who sees the module on the
+  portal (`portal_visibility`: people with a role in it, or every member).
+- **Audit log** page and `GET /api/v1/audit-events` (filters, paging). Den
+  records module, pairing, credential, branding, organisation and module
+  settings changes, Keycloak syncs, backups, schedule changes and backup
+  downloads, each with the person who did it.
+- **Module settings** page (`GET/PUT /api/v1/module-settings`): retention
+  periods (marked pending legal review), SMTP (the password is write-only),
+  Finance seller details, Stash Lost & Found retention, the Rally
+  submission-site host and identity links (account console, sign-in name,
+  identity provider admin console). Paired modules receive them in the
+  integration bundle (`module_settings`) or from
+  `GET /api/v1/integrations/module-settings`, each module only the parts it
+  uses. The admin menu links to the identity provider console from here.
+- Portal to-dos come from Den's backend (`GET /api/v1/portal/todos`): Den
+  asks each module the person may use for `GET /api/portal/todos` with the
+  module's pairing credential and the person's issuer and subject
+  (`X-Den-User-Issuer`, `X-Den-User-Subject`). Needs `DEN_CREDENTIAL_KEY`;
+  modules paired before the key was set must be paired again.
+- `den-server healthcheck` and `den-operator healthcheck` probe the running
+  process's `/livez`, for Docker Compose healthchecks.
+- `DEN_PREREGISTER_MODULES` entries accept `internal_url`.
 - Sign-in background picture, with a panel or centred layout and an optional
   caption.
 - User preferences (light, dark or system theme), shared with paired
@@ -77,6 +117,32 @@ MAJOR is the MAJOR every module is built for
 
 ### Security
 
+- A pairing URL gives exactly one credential, also when it is redeemed
+  twice at the same moment. `module_id` and `module_slug` sent by the module
+  must match the module the URL was made for. Pairing again revokes every
+  older credential of the module at once. Runbook for a leaked pairing URL
+  or credential:
+  [Disaster recovery](https://aglelectronics.github.io/con-services/operations/disaster-recovery/).
+- Rate limits per client IP: 10 pairing redeems, 120 public brand requests
+  and 10 backup downloads a minute (`429` with `Retry-After`).
+- Branding uploads accept only the roles `logo`, `favicon` and
+  `login-background` and only PNG, JPEG, WebP, ICO and SVG files, recognised
+  from their content. Assets are served with `X-Content-Type-Options:
+  nosniff`; SVG is served as a download with a sandbox policy.
+- Module addresses must be `https` (`http` only with
+  `APP_ENV=development`), and slugs are checked, in the API and in
+  `DEN_PREREGISTER_MODULES`.
+- Den deletes a module's database only when Den created it.
+- Members see only the modules they may use and no organisation-wide
+  counts. Paired modules can read or change preferences only of their own
+  users.
+- Disabled accounts (`users.is_disabled`) are refused. The seeded dev owner
+  account is removed by a migration, and the unused `role_assignments`
+  table is dropped.
+- One-time backup download links are stored in the database and work once,
+  on any replica.
+- The browser no longer sends the person's token to modules for to-dos;
+  Den calls the modules itself.
 - The backend reads the client address from `X-Forwarded-For` only when
   the connection comes from a trusted proxy (`TRUSTED_PROXY_CIDRS`), and
   ignores `X-Real-IP` and `True-Client-IP`, so rate limits cannot be
