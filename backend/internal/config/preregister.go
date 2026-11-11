@@ -24,9 +24,46 @@ type PreregisteredModule struct {
 
 var moduleSlugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
+// ValidateModuleSlug checks a module slug: lowercase letters, digits and
+// single hyphens, at most 40 characters.
+func ValidateModuleSlug(slug string) error {
+	if slug == "" {
+		return errors.New("is required")
+	}
+	if len(slug) > 40 || !moduleSlugPattern.MatchString(slug) {
+		return errors.New("must be lowercase letters, digits and single hyphens (at most 40), for example \"rally\"")
+	}
+	return nil
+}
+
+// ValidateModuleURL checks a module address: an absolute https URL without
+// user info, query or fragment. allowHTTP also accepts http (APP_ENV=development).
+func ValidateModuleURL(raw string, allowHTTP bool) error {
+	if raw == "" {
+		return errors.New("is required")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.Opaque != "" {
+		return fmt.Errorf("must be an absolute URL such as https://stash.example.org, got %q", raw)
+	}
+	switch {
+	case u.Scheme == "https":
+	case u.Scheme == "http" && allowHTTP:
+	case u.Scheme == "http":
+		return fmt.Errorf("must use https (http is only allowed with APP_ENV=development), got %q", raw)
+	default:
+		return fmt.Errorf("must be an https URL, got %q", raw)
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("must not contain a user name, query or fragment, got %q", raw)
+	}
+	return nil
+}
+
 // ParsePreregisterModules parses DEN_PREREGISTER_MODULES: a JSON array of
 // {"slug","display_name","base_url"[,"environment"]}. Empty means none.
-func ParsePreregisterModules(raw string) ([]PreregisteredModule, error) {
+// allowHTTP accepts http base URLs (APP_ENV=development).
+func ParsePreregisterModules(raw string, allowHTTP bool) ([]PreregisteredModule, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, nil
@@ -56,16 +93,13 @@ func ParsePreregisterModules(raw string) ([]PreregisteredModule, error) {
 		if m.Slug != "" {
 			where = fmt.Sprintf("entry %d (%q)", i, m.Slug)
 		}
-		switch {
-		case m.Slug == "":
-			errs = append(errs, where+": slug is required")
-		case !moduleSlugPattern.MatchString(m.Slug):
-			errs = append(errs, where+": slug must be lowercase letters, digits and single hyphens, for example \"rally\"")
+		if err := ValidateModuleSlug(m.Slug); err != nil {
+			errs = append(errs, where+": slug "+err.Error())
 		}
 		if m.DisplayName == "" {
 			errs = append(errs, where+": display_name is required")
 		}
-		if err := validateModuleBaseURL(m.BaseURL); err != nil {
+		if err := ValidateModuleURL(m.BaseURL, allowHTTP); err != nil {
 			errs = append(errs, where+": base_url "+err.Error())
 		}
 		key := m.Slug + "\x00" + m.Environment
@@ -79,15 +113,4 @@ func ParsePreregisterModules(raw string) ([]PreregisteredModule, error) {
 		return nil, errors.New("DEN_PREREGISTER_MODULES: " + strings.Join(errs, "; "))
 	}
 	return mods, nil
-}
-
-func validateModuleBaseURL(raw string) error {
-	if raw == "" {
-		return errors.New("is required")
-	}
-	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return fmt.Errorf("must be an absolute http(s) URL, got %q", raw)
-	}
-	return nil
 }

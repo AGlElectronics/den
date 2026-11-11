@@ -7,7 +7,7 @@ import (
 
 func TestParsePreregisterModulesEmpty(t *testing.T) {
 	for _, raw := range []string{"", "   ", "[]"} {
-		mods, err := ParsePreregisterModules(raw)
+		mods, err := ParsePreregisterModules(raw, true)
 		if err != nil {
 			t.Fatalf("%q: unexpected error: %v", raw, err)
 		}
@@ -22,7 +22,7 @@ func TestParsePreregisterModulesValid(t *testing.T) {
 		{"slug":"rally","display_name":" Rally ","base_url":"https://rally.example.org"},
 		{"slug":"stash","display_name":"Stash","base_url":"http://stash:8080","environment":"staging"}
 	]`
-	mods, err := ParsePreregisterModules(raw)
+	mods, err := ParsePreregisterModules(raw, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -53,14 +53,15 @@ func TestParsePreregisterModulesInvalid(t *testing.T) {
 		"bad slug":         {`[{"slug":"Rally App","display_name":"Rally","base_url":"http://r"}]`, "slug must be"},
 		"missing name":     {`[{"slug":"rally","base_url":"http://r"}]`, "display_name is required"},
 		"missing url":      {`[{"slug":"rally","display_name":"Rally"}]`, "base_url is required"},
-		"relative url":     {`[{"slug":"rally","display_name":"Rally","base_url":"rally:8080"}]`, "absolute http(s) URL"},
-		"ftp url":          {`[{"slug":"rally","display_name":"Rally","base_url":"ftp://rally"}]`, "absolute http(s) URL"},
+		"relative url":     {`[{"slug":"rally","display_name":"Rally","base_url":"rally:8080"}]`, "absolute URL"},
+		"ftp url":          {`[{"slug":"rally","display_name":"Rally","base_url":"ftp://rally"}]`, "must be an https URL"},
+		"query in url":     {`[{"slug":"rally","display_name":"Rally","base_url":"https://r?x=1"}]`, "query"},
 		"duplicate": {`[{"slug":"rally","display_name":"A","base_url":"http://a"},
 			{"slug":"rally","display_name":"B","base_url":"http://b","environment":"production"}]`, "duplicates entry 0"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := ParsePreregisterModules(tc.raw)
+			_, err := ParsePreregisterModules(tc.raw, true)
 			if err == nil {
 				t.Fatal("want error, got nil")
 			}
@@ -74,7 +75,7 @@ func TestParsePreregisterModulesInvalid(t *testing.T) {
 func TestParsePreregisterModulesSameSlugOtherEnvironment(t *testing.T) {
 	raw := `[{"slug":"rally","display_name":"Rally","base_url":"http://a"},
 		{"slug":"rally","display_name":"Rally","base_url":"http://b","environment":"staging"}]`
-	if _, err := ParsePreregisterModules(raw); err != nil {
+	if _, err := ParsePreregisterModules(raw, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -99,5 +100,23 @@ func TestLoadFailsOnInvalidPreregisterModules(t *testing.T) {
 	}
 	if len(cfg.PreregisterModules) != 1 || cfg.PreregisterModules[0].Environment != "production" {
 		t.Fatalf("unexpected modules: %+v", cfg.PreregisterModules)
+	}
+
+	t.Setenv("APP_ENV", "production")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "must use https") {
+		t.Fatalf("outside development an http base_url must be refused, got %v", err)
+	}
+}
+
+func TestValidateModuleSlug(t *testing.T) {
+	for _, ok := range []string{"rally", "lost-and-found", "a1"} {
+		if err := ValidateModuleSlug(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "Rally", "a--b", "-a", "a_b", "a b", strings.Repeat("a", 41)} {
+		if ValidateModuleSlug(bad) == nil {
+			t.Errorf("%q should be refused", bad)
+		}
 	}
 }

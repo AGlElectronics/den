@@ -126,7 +126,7 @@ func Load() (*Config, error) {
 	}
 	cfg.TrustedProxyCIDRs = trusted
 
-	prereg, err := ParsePreregisterModules(getEnv("DEN_PREREGISTER_MODULES", ""))
+	prereg, err := ParsePreregisterModules(getEnv("DEN_PREREGISTER_MODULES", ""), cfg.IsDevelopment())
 	if err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
@@ -137,6 +137,10 @@ func Load() (*Config, error) {
 	}
 	return cfg, nil
 }
+
+// IsDevelopment reports APP_ENV=development, which allows http module
+// addresses.
+func (c *Config) IsDevelopment() bool { return c.AppEnv == "development" }
 
 func (c *Config) validate() error {
 	var errs []string
