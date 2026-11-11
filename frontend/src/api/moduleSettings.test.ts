@@ -14,9 +14,9 @@ describe('compactSettings', () => {
     ).toEqual({ retention: { inactive_users_days: 30 }, rally: { submission_site_host: 'submit.example.org' } });
   });
 
-  it('keeps an explicit null password so the server clears it', () => {
-    expect(compactSettings({ smtp: { host: 'smtp.example.org', password: null } })).toEqual({
-      smtp: { host: 'smtp.example.org', password: null },
+  it('does not send a password', () => {
+    expect(compactSettings({ smtp: { host: 'smtp.example.org', password_set: false } })).toEqual({
+      smtp: { host: 'smtp.example.org' },
     });
   });
 

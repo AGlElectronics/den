@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -13,7 +15,7 @@ func baseEnv(t *testing.T) {
 		"DEN_PREREGISTER_MODULES": "", "DEN_CREDENTIAL_KEY": "", "IDENTITY_STAFF_MODE": "", "OPERATOR_URL": "",
 		"OPERATOR_TOKEN": "", "DEN_OPS_GROUPS": "", "OIDC_ISSUER_URL": "", "OIDC_CLIENT_ID": "", "KEYCLOAK_REALM": "",
 		"OIDC_AUDIENCE": "", "OIDC_GROUPS_CLAIM": "", "OIDC_GROUP_MATCH": "", "OIDC_GROUP_PREFIX": "",
-		"BACKUP_SAME_STORAGE_AS_DATA": "",
+		"BACKUP_SAME_STORAGE_AS_DATA": "", "DEN_SMTP_PASSWORD": "", "DEN_SMTP_PASSWORD_FILE": "",
 	} {
 		t.Setenv(k, v)
 	}
@@ -47,6 +49,8 @@ func TestLoadValidation(t *testing.T) {
 		"bad group match":      {map[string]string{"OIDC_GROUP_MATCH": "prefix"}, "OIDC_GROUP_MATCH must be"},
 		"missing database":     {map[string]string{"DATABASE_URL": ""}, "DATABASE_URL is required"},
 		"bad proxy cidr":       {map[string]string{"TRUSTED_PROXY_CIDRS": "nope"}, "TRUSTED_PROXY_CIDRS"},
+		"smtp password both":   {map[string]string{"DEN_SMTP_PASSWORD": "s3cret", "DEN_SMTP_PASSWORD_FILE": "missing-file"}, "set only one of DEN_SMTP_PASSWORD and DEN_SMTP_PASSWORD_FILE"},
+		"smtp password file":   {map[string]string{"DEN_SMTP_PASSWORD_FILE": "missing-smtp-password-file"}, "read DEN_SMTP_PASSWORD_FILE"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -110,4 +114,63 @@ func TestAppEnvDefaultsToProduction(t *testing.T) {
 	if cfg.AppEnv != "production" || cfg.IsDevelopment() {
 		t.Fatalf("APP_ENV %q", cfg.AppEnv)
 	}
+}
+
+func TestSMTPPassword(t *testing.T) {
+	t.Run("env", func(t *testing.T) {
+		t.Setenv("DEN_SMTP_PASSWORD", "s3cret")
+		t.Setenv("DEN_SMTP_PASSWORD_FILE", "")
+		got, err := SMTPPassword()
+		if err != nil || got != "s3cret" {
+			t.Fatalf("got %q %v", got, err)
+		}
+	})
+	t.Run("unset", func(t *testing.T) {
+		t.Setenv("DEN_SMTP_PASSWORD", "")
+		t.Setenv("DEN_SMTP_PASSWORD_FILE", "")
+		got, err := SMTPPassword()
+		if err != nil || got != "" {
+			t.Fatalf("got %q %v", got, err)
+		}
+	})
+	t.Run("file", func(t *testing.T) {
+		t.Setenv("DEN_SMTP_PASSWORD", "")
+		path := filepath.Join(t.TempDir(), "smtp")
+		if err := os.WriteFile(path, []byte("file-secret\r\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("DEN_SMTP_PASSWORD_FILE", path)
+		got, err := SMTPPassword()
+		if err != nil || got != "file-secret" {
+			t.Fatalf("got %q %v", got, err)
+		}
+		// A replacement is visible on the next read.
+		if err := os.WriteFile(path, []byte("rotated"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got, err = SMTPPassword()
+		if err != nil || got != "rotated" {
+			t.Fatalf("after replace: %q %v", got, err)
+		}
+	})
+	t.Run("empty file", func(t *testing.T) {
+		t.Setenv("DEN_SMTP_PASSWORD", "")
+		path := filepath.Join(t.TempDir(), "smtp")
+		if err := os.WriteFile(path, []byte("\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("DEN_SMTP_PASSWORD_FILE", path)
+		got, err := SMTPPassword()
+		if err != nil || got != "" {
+			t.Fatalf("got %q %v", got, err)
+		}
+	})
+	t.Run("both", func(t *testing.T) {
+		t.Setenv("DEN_SMTP_PASSWORD", "s3cret")
+		t.Setenv("DEN_SMTP_PASSWORD_FILE", filepath.Join(t.TempDir(), "smtp"))
+		got, err := SMTPPassword()
+		if err == nil || got != "" || !strings.Contains(err.Error(), "set only one of DEN_SMTP_PASSWORD and DEN_SMTP_PASSWORD_FILE") || strings.Contains(err.Error(), "s3cret") {
+			t.Fatalf("got %q %v", got, err)
+		}
+	})
 }

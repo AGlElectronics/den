@@ -3,6 +3,8 @@ package http_test
 import (
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +15,8 @@ import (
 func TestModuleSettings(t *testing.T) {
 	e := newEnv(t, nil)
 	admin := adminTok()
+	t.Setenv("DEN_SMTP_PASSWORD", "")
+	t.Setenv("DEN_SMTP_PASSWORD_FILE", "")
 	t.Cleanup(func() { _, _ = e.pool.Exec(context.Background(), `DELETE FROM module_settings`) })
 
 	var bad struct {
@@ -22,7 +26,7 @@ func TestModuleSettings(t *testing.T) {
 	}
 	e.expect(e.do(http.MethodPut, "/api/v1/module-settings", admin, map[string]any{"data": map[string]any{
 		"retention": map[string]any{"inactive_users_days": -1},
-		"smtp":      map[string]any{"host": "not a host", "port": 70000, "from": "nobody", "security": "ssl"},
+		"smtp":      map[string]any{"host": "not a host", "port": 70000, "from": "nobody", "security": "ssl", "password": "nope"},
 		"finance":   map[string]any{"seller": map[string]any{"vat_id": "123", "country": "Austria", "email": "x", "website": "ftp://x"}},
 		"stash":     map[string]any{"lost_found": map[string]any{"mode": "forever"}},
 		"wiki":      map[string]any{"revision_retention_days": -5},
@@ -30,7 +34,7 @@ func TestModuleSettings(t *testing.T) {
 		"rally":     map[string]any{"submission_site_host": "https://submit.example.org"},
 		"identity":  map[string]any{"account_console_url": "ftp://x"},
 	}}), http.StatusUnprocessableEntity).json(t, &bad)
-	for _, k := range []string{"retention.inactive_users_days", "smtp.host", "smtp.port", "smtp.from", "smtp.security",
+	for _, k := range []string{"retention.inactive_users_days", "smtp.host", "smtp.port", "smtp.from", "smtp.security", "smtp.password",
 		"finance.seller.vat_id", "finance.seller.country", "finance.seller.email", "finance.seller.website",
 		"stash.lost_found.mode", "wiki.revision_retention_days", "tasks.due_soon_days",
 		"rally.submission_site_host", "identity.account_console_url"} {
@@ -38,13 +42,20 @@ func TestModuleSettings(t *testing.T) {
 			t.Errorf("missing error for %s: %v", k, bad.Error.Details)
 		}
 	}
+	if !strings.Contains(bad.Error.Details["smtp.password"], "DEN_SMTP_PASSWORD") {
+		t.Errorf("password rejection: %q", bad.Error.Details["smtp.password"])
+	}
+	e.expect(e.do(http.MethodPut, "/api/v1/module-settings", admin, map[string]any{
+		"data": map[string]any{"smtp": map[string]any{"host": "smtp.example.org", "password": nil}},
+	}), http.StatusUnprocessableEntity)
 	e.expect(e.do(http.MethodPut, "/api/v1/module-settings", admin, map[string]any{"data": map[string]any{"unknown": 1}}), http.StatusBadRequest)
 	e.expect(e.do(http.MethodPut, "/api/v1/module-settings", admin, map[string]any{"retention": map[string]any{}}), http.StatusBadRequest)
 
+	t.Setenv("DEN_SMTP_PASSWORD", "s3cret")
 	data := map[string]any{
 		"retention": map[string]any{"offboarded_volunteers_days": 365, "module_data_days": 0},
 		"smtp": map[string]any{"host": "SMTP.example.org", "from": "noreply@example.org", "from_name": "Example Con",
-			"username": "noreply", "password": "s3cret"},
+			"username": "noreply"},
 		"finance": map[string]any{"seller": map[string]any{"legal_name": "Example Con e.V.", "address": "Main St 1\n1010 Vienna",
 			"country": "at", "vat_id": "atu 1234 5678", "email": "finance@example.org", "website": "https://example.org"}},
 		"stash":    map[string]any{"lost_found": map[string]any{"mode": "deleted_after_closing", "days": 9}},
@@ -80,14 +91,20 @@ func TestModuleSettings(t *testing.T) {
 		t.Fatalf("saved: %s", r.Body)
 	}
 
-	// Saving again without a password keeps it; a GET answer can be sent back.
-	delete(data["smtp"].(map[string]any), "password")
+	// A GET answer can be sent back. The password stays the secret's value.
 	doc["updated_at"] = saved.UpdatedAt
 	e.expect(e.do(http.MethodPut, "/api/v1/module-settings", admin, doc), http.StatusOK).json(t, &saved)
 	if saved.Data.SMTP["password_set"] != true {
-		t.Fatal("password must be kept when not sent")
+		t.Fatal("password_set must follow DEN_SMTP_PASSWORD")
 	}
 	delete(doc, "updated_at")
+	var stored string
+	if err := e.pool.QueryRow(context.Background(), `SELECT data::text FROM module_settings`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stored, "s3cret") || strings.Contains(stored, "password") {
+		t.Fatalf("the password must not be stored: %s", stored)
+	}
 
 	var page struct {
 		Items []struct {
@@ -96,8 +113,13 @@ func TestModuleSettings(t *testing.T) {
 	}
 	raw := e.expect(e.do(http.MethodGet, "/api/v1/audit-events?action=module_settings.update&since="+time.Now().Add(-time.Minute).UTC().Format(time.RFC3339), admin, nil), http.StatusOK)
 	raw.json(t, &page)
-	if len(page.Items) < 2 || strings.Contains(string(raw.Body), "s3cret") || page.Items[len(page.Items)-1].Note != "SMTP password set" {
+	if len(page.Items) < 2 || strings.Contains(string(raw.Body), "s3cret") {
 		t.Fatalf("audit: %s", raw.Body)
+	}
+	for _, it := range page.Items {
+		if strings.Contains(it.Note, "SMTP password") {
+			t.Fatalf("the audit log must not record password changes: %s", raw.Body)
+		}
 	}
 
 	// Each module gets retention, smtp and only its own section, under data.
@@ -171,15 +193,66 @@ func TestModuleSettings(t *testing.T) {
 		t.Fatalf("admin identity links: %v", d.IdentityLinks)
 	}
 
-	// Removing the SMTP section clears the password.
+	// Removing the SMTP section does not touch the secret. password_set
+	// stays true while DEN_SMTP_PASSWORD is set.
 	delete(data, "smtp")
-	e.expect(e.do(http.MethodPut, "/api/v1/module-settings", admin, doc), http.StatusOK)
-	var stored string
-	_ = e.pool.QueryRow(context.Background(), `SELECT secrets::text FROM module_settings`).Scan(&stored)
-	if strings.Contains(stored, "s3cret") {
-		t.Fatal("password must be cleared with the SMTP section")
+	var cleared struct {
+		Data struct {
+			SMTP map[string]any `json:"smtp"`
+		} `json:"data"`
+	}
+	e.expect(e.do(http.MethodPut, "/api/v1/module-settings", admin, doc), http.StatusOK).json(t, &cleared)
+	if cleared.Data.SMTP["password_set"] != true {
+		t.Fatal("removing smtp settings must not clear the secret")
+	}
+	t.Setenv("DEN_SMTP_PASSWORD", "")
+	var off struct {
+		Data struct {
+			SMTP map[string]any `json:"smtp"`
+		} `json:"data"`
+	}
+	e.expect(e.do(http.MethodGet, "/api/v1/module-settings", admin, nil), http.StatusOK).json(t, &off)
+	if off.Data.SMTP != nil {
+		t.Fatalf("no smtp section and no secret: %v", off.Data.SMTP)
+	}
+	secrets = map[string]map[string]string{}
+	sr = e.expect(e.do(http.MethodGet, "/api/v1/integrations/module-settings/secrets", stash, nil), http.StatusOK)
+	sr.json(t, &secrets)
+	if len(secrets) != 0 {
+		t.Fatalf("no password: %s", sr.Body)
 	}
 	e.expect(e.do(http.MethodGet, "/api/v1/module-settings", memberTok(), nil), http.StatusForbidden)
+}
+
+func TestModuleSettingsSMTPPasswordFile(t *testing.T) {
+	e := newEnv(t, nil)
+	t.Setenv("DEN_SMTP_PASSWORD", "")
+	path := filepath.Join(t.TempDir(), "smtp-password")
+	if err := os.WriteFile(path, []byte("file-secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DEN_SMTP_PASSWORD_FILE", path)
+	stashID, _ := e.newModule("https://stash-file.example.test")
+	stash := e.pair(stashID, nil)
+	var secrets map[string]map[string]string
+	sr := e.expect(e.do(http.MethodGet, "/api/v1/integrations/module-settings/secrets", stash, nil), http.StatusOK)
+	sr.json(t, &secrets)
+	if secrets["smtp"]["password"] != "file-secret" || strings.Contains(secrets["smtp"]["password"], "\n") {
+		t.Fatalf("file password: %s", sr.Body)
+	}
+	if err := os.WriteFile(path, []byte("rotated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sr = e.expect(e.do(http.MethodGet, "/api/v1/integrations/module-settings/secrets", stash, nil), http.StatusOK)
+	sr.json(t, &secrets)
+	if secrets["smtp"]["password"] != "rotated" {
+		t.Fatalf("rotated: %s", sr.Body)
+	}
+	t.Setenv("DEN_SMTP_PASSWORD", "also-set")
+	sr = e.expect(e.do(http.MethodGet, "/api/v1/integrations/module-settings/secrets", stash, nil), http.StatusInternalServerError)
+	if strings.Contains(string(sr.Body), "also-set") || strings.Contains(string(sr.Body), "rotated") || strings.Contains(string(sr.Body), "file-secret") {
+		t.Fatalf("misconfiguration must not echo the password: %s", sr.Body)
+	}
 }
 
 // migrationUp returns the "-- +goose Up" part of a migration file.
@@ -243,5 +316,43 @@ func TestTasksSettingsMigrationFlattensKeys(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("migrated data %s lacks %s", got, want)
 		}
+	}
+}
+
+func TestSMTPPasswordColumnDropped(t *testing.T) {
+	e := newEnv(t, nil)
+	t.Cleanup(func() {
+		_, _ = e.pool.Exec(context.Background(), `DELETE FROM module_settings`)
+		_, _ = e.pool.Exec(context.Background(), `ALTER TABLE module_settings DROP COLUMN IF EXISTS secrets`)
+	})
+	ctx := context.Background()
+	var n int
+	if err := e.pool.QueryRow(ctx, `
+		SELECT count(*) FROM information_schema.columns
+		 WHERE table_name = 'module_settings' AND column_name = 'secrets'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("secrets column still exists after migrations")
+	}
+	if _, err := e.pool.Exec(ctx, `ALTER TABLE module_settings ADD COLUMN secrets JSONB NOT NULL DEFAULT '{}'::jsonb`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `
+		INSERT INTO module_settings (organization_id, secrets) VALUES ($1, $2)
+		ON CONFLICT (organization_id) DO UPDATE SET secrets = EXCLUDED.secrets`, testOrgID,
+		`{"smtp_password":"s3cret"}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, migrationUp(t, "20261111000008_drop_module_settings_secrets.sql")); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.pool.QueryRow(ctx, `
+		SELECT count(*) FROM information_schema.columns
+		 WHERE table_name = 'module_settings' AND column_name = 'secrets'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatal("migration did not drop secrets")
 	}
 }

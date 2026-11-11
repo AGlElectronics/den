@@ -41,22 +41,13 @@ export function ModuleSettingsPage() {
   const qc = useQueryClient();
   const settings = useQuery({ queryKey: ['module-settings'], queryFn: getModuleSettings });
   const [d, setD] = useState<ModuleSettingsData>({});
-  const [password, setPassword] = useState('');
-  const [clearPassword, setClearPassword] = useState(false);
   useEffect(() => {
     if (settings.data) setD(settings.data.data);
   }, [settings.data]);
 
   const save = useMutation({
-    mutationFn: () => {
-      const body = compactSettings(d);
-      if (password) body.smtp = { ...(body.smtp ?? {}), password };
-      else if (clearPassword) body.smtp = { ...(body.smtp ?? {}), password: null };
-      return putModuleSettings(body);
-    },
+    mutationFn: () => putModuleSettings(compactSettings(d)),
     onSuccess: (s) => {
-      setPassword('');
-      setClearPassword(false);
       qc.setQueryData(['module-settings'], s);
     },
   });
@@ -154,19 +145,21 @@ export function ModuleSettingsPage() {
           <Field label="User name" error={errors['smtp.username']}>
             <input className={input} value={d.smtp?.username ?? ''} autoComplete="off" onChange={(e) => set('smtp', { username: e.target.value })} />
           </Field>
-          <Field
-            label="Password"
-            hint={d.smtp?.password_set ? 'A password is saved. Type a new one to replace it.' : 'No password saved.'}
-            error={errors['smtp.password']}
-          >
-            <input className={input} type="password" value={password} autoComplete="new-password" onChange={(e) => setPassword(e.target.value)} />
-          </Field>
-          {d.smtp?.password_set && (
-            <label className="flex items-center gap-2 self-end pb-2">
-              <input type="checkbox" checked={clearPassword} onChange={(e) => setClearPassword(e.target.checked)} /> Remove the saved password
-            </label>
-          )}
         </div>
+        <p className="text-xs text-den-foreground/60">
+          <span>
+            {d.smtp?.password_set
+              ? "Password: configured in Den's secret (DEN_SMTP_PASSWORD)"
+              : 'Password: not set'}
+          </span>{' '}
+          <a
+            className="underline"
+            href="https://aglelectronics.github.io/con-services/modules/den/configuration/#shared-smtp-password"
+          >
+            How to set it
+          </a>
+          {errors['smtp.password'] && <span className="block text-den-danger">{errors['smtp.password']}</span>}
+        </p>
       </section>
 
       <section className={card}>

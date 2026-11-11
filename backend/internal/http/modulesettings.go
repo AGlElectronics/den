@@ -35,8 +35,10 @@ import (
 //	rally           — slug "events" or "rally"
 //
 // identity is Den's own (links on the portal) and is never sent. The SMTP
-// password is write-only on the admin API and never in the bundle: a module
-// fetches it from GET /api/v1/integrations/module-settings/secrets.
+// password is not stored: it comes from the secret DEN_SMTP_PASSWORD, or
+// from the file DEN_SMTP_PASSWORD_FILE. The admin API and the bundle only
+// report password_set. A module fetches the value from
+// GET /api/v1/integrations/module-settings/secrets.
 
 type moduleSettingsHandler struct {
 	pool      *pgxpool.Pool
@@ -54,8 +56,9 @@ type smtpSettings struct {
 	Port     *int    `json:"port,omitempty"`
 	Security *string `json:"security,omitempty"`
 	Username *string `json:"username,omitempty"`
-	// Password is write-only on the admin API: a string sets it, null
-	// clears it, leaving it out keeps it.
+	// Password is not a setting. Sending the field (a string, null or
+	// anything else) is rejected: the password is DEN_SMTP_PASSWORD or
+	// DEN_SMTP_PASSWORD_FILE.
 	Password    json.RawMessage `json:"password,omitempty"`
 	PasswordSet bool            `json:"password_set"`
 	From        *string         `json:"from,omitempty"`
@@ -126,9 +129,9 @@ type moduleSettingsDoc struct {
 	Identity  *identitySettings  `json:"identity,omitempty"`
 }
 
-type moduleSettingsSecrets struct {
-	SMTPPassword string `json:"smtp_password,omitempty"`
-}
+// smtpPasswordRejected is the validation message for a body that still
+// tries to send smtp.password.
+const smtpPasswordRejected = "is set with the secret DEN_SMTP_PASSWORD (or DEN_SMTP_PASSWORD_FILE), not in module settings"
 
 var (
 	hostPattern    = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]*[a-z0-9])?(:[0-9]{1,5})?$`)
@@ -151,10 +154,10 @@ func intPtr(v int) *int       { return &v }
 func strPtr(v string) *string { return &v }
 
 // normalize trims values, drops empty ones, fills the contract's defaults
-// and returns per-key errors. It returns the new SMTP password (set),
-// whether it is cleared, or neither.
-func (h *moduleSettingsHandler) normalize(d *moduleSettingsDoc) (fields map[string]string, newPassword *string, clearPassword bool) {
-	fields = map[string]string{}
+// and returns per-key errors. smtp.password is rejected: the password is
+// a secret, not a module setting.
+func (h *moduleSettingsHandler) normalize(d *moduleSettingsDoc) map[string]string {
+	fields := map[string]string{}
 	intIn := func(key string, v *int, lo, hi int) {
 		if v != nil && (*v < lo || *v > hi) {
 			fields[key] = "must be between " + strconv.Itoa(lo) + " and " + strconv.Itoa(hi)
@@ -217,19 +220,8 @@ func (h *moduleSettingsHandler) normalize(d *moduleSettingsDoc) (fields map[stri
 		emailOK("smtp.from", &s.From, "noreply@example.org")
 		strMax("smtp.from_name", &s.FromName, 200)
 		strMax("smtp.username", &s.Username, 256)
-		switch raw := strings.TrimSpace(string(s.Password)); {
-		case raw == "":
-		case raw == "null":
-			clearPassword = true
-		default:
-			var pw string
-			if err := json.Unmarshal(s.Password, &pw); err != nil {
-				fields["smtp.password"] = "must be a string or null"
-			} else if len(pw) > 512 {
-				fields["smtp.password"] = "must be at most 512 characters"
-			} else if pw != "" {
-				newPassword = &pw
-			}
+		if len(strings.TrimSpace(string(s.Password))) > 0 {
+			fields["smtp.password"] = smtpPasswordRejected
 		}
 		s.Password = nil
 	}
@@ -297,7 +289,7 @@ func (h *moduleSettingsHandler) normalize(d *moduleSettingsDoc) (fields map[stri
 		urlOK("identity.idp_admin_console_url", &i.IdPAdminConsoleURL)
 		strMax("identity.sso_name", &i.SSOName, 100)
 	}
-	return fields, newPassword, clearPassword
+	return fields
 }
 
 // pruneEmpty removes objects that hold no value (after normalize dropped
@@ -350,35 +342,55 @@ type moduleSettingsPayload struct {
 
 func (h *moduleSettingsHandler) load(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
-}) (moduleSettingsDoc, moduleSettingsSecrets, *time.Time, error) {
+}) (moduleSettingsDoc, *time.Time, error) {
 	var (
 		doc     moduleSettingsDoc
-		sec     moduleSettingsSecrets
 		raw     []byte
-		rawSec  []byte
 		updated time.Time
 	)
-	err := q.QueryRow(ctx, `SELECT data, secrets, updated_at FROM module_settings WHERE organization_id = $1`, defaultOrgID).
-		Scan(&raw, &rawSec, &updated)
+	err := q.QueryRow(ctx, `SELECT data, updated_at FROM module_settings WHERE organization_id = $1`, defaultOrgID).
+		Scan(&raw, &updated)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return doc, sec, nil, nil
+		doc = moduleSettingsDoc{}
+		if err := applySMTPPassword(&doc); err != nil {
+			return doc, nil, err
+		}
+		return doc, nil, nil
 	}
 	if err != nil {
-		return doc, sec, nil, err
+		return doc, nil, err
 	}
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return doc, sec, nil, err
+		return doc, nil, err
 	}
-	if err := json.Unmarshal(rawSec, &sec); err != nil {
-		return doc, sec, nil, err
+	if err := applySMTPPassword(&doc); err != nil {
+		return doc, nil, err
 	}
-	if sec.SMTPPassword != "" {
-		if doc.SMTP == nil {
-			doc.SMTP = &smtpSettings{}
+	return doc, &updated, nil
+}
+
+// applySMTPPassword sets password_set from DEN_SMTP_PASSWORD or
+// DEN_SMTP_PASSWORD_FILE. The value itself is never put on the document.
+func applySMTPPassword(doc *moduleSettingsDoc) error {
+	if doc.SMTP != nil {
+		// A password must never be read back out of the settings document.
+		doc.SMTP.Password = nil
+	}
+	pw, err := config.SMTPPassword()
+	if err != nil {
+		return err
+	}
+	if pw == "" {
+		if doc.SMTP != nil {
+			doc.SMTP.PasswordSet = false
 		}
-		doc.SMTP.PasswordSet = true
+		return nil
 	}
-	return doc, sec, &updated, nil
+	if doc.SMTP == nil {
+		doc.SMTP = &smtpSettings{}
+	}
+	doc.SMTP.PasswordSet = true
+	return nil
 }
 
 func formatUpdated(updated *time.Time) *string {
@@ -390,7 +402,7 @@ func formatUpdated(updated *time.Time) *string {
 }
 
 func (h *moduleSettingsHandler) get(w http.ResponseWriter, r *http.Request) {
-	doc, _, updated, err := h.load(r.Context(), h.pool)
+	doc, updated, err := h.load(r.Context(), h.pool)
 	if err != nil {
 		httperror.Render(w, r, httperror.Internal(err))
 		return
@@ -399,7 +411,7 @@ func (h *moduleSettingsHandler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 // put is PUT /api/v1/module-settings with {"data": {…}}: replaces the whole
-// document (the SMTP password is kept unless sent).
+// document. smtp.password is rejected; the password is a secret.
 func (h *moduleSettingsHandler) put(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Data *moduleSettingsDoc `json:"data"`
@@ -415,7 +427,7 @@ func (h *moduleSettingsHandler) put(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := *body.Data
-	fields, newPassword, clearPassword := h.normalize(&in)
+	fields := h.normalize(&in)
 	if len(fields) > 0 {
 		httperror.Render(w, r, httperror.Validation("validation failed", fields))
 		return
@@ -437,40 +449,22 @@ func (h *moduleSettingsHandler) put(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(r.Context(), `SELECT 1 FROM module_settings WHERE organization_id = $1 FOR UPDATE`, defaultOrgID); err != nil {
 			return err
 		}
-		before, sec, _, err := h.load(r.Context(), tx)
-		if err != nil {
-			return err
-		}
-		passwordChange := ""
-		switch {
-		case newPassword != nil:
-			sec.SMTPPassword, passwordChange = *newPassword, "set"
-		case clearPassword || in.SMTP == nil:
-			if sec.SMTPPassword != "" {
-				passwordChange = "cleared"
-			}
-			sec.SMTPPassword = ""
-		}
-		secrets, err := json.Marshal(sec)
+		before, _, err := h.load(r.Context(), tx)
 		if err != nil {
 			return err
 		}
 		if _, err := tx.Exec(r.Context(), `
-			UPDATE module_settings SET data = $2, secrets = $3, updated_at = now(), updated_by = $4
-			 WHERE organization_id = $1`, defaultOrgID, data, secrets, auth.ActorID(r.Context())); err != nil {
+			UPDATE module_settings SET data = $2, updated_at = now(), updated_by = $3
+			 WHERE organization_id = $1`, defaultOrgID, data, auth.ActorID(r.Context())); err != nil {
 			return err
 		}
-		saved, _, updated, err = h.load(r.Context(), tx)
+		saved, updated, err = h.load(r.Context(), tx)
 		if err != nil {
 			return err
 		}
-		note := ""
-		if passwordChange != "" {
-			note = "SMTP password " + passwordChange
-		}
 		return audit.Write(r.Context(), tx, audit.Event{
 			OrgID: orgRef(), Action: "module_settings.update", EntityType: "organization", EntityID: defaultOrgID,
-			Before: before, After: saved, Note: note,
+			Before: before, After: saved,
 		})
 	})
 	if err != nil {
@@ -495,7 +489,7 @@ func moduleSection(slug string) string {
 // forModule is what a module with slug receives: retention, smtp (with
 // password_set, never the password) and its own section.
 func (h *moduleSettingsHandler) forModule(ctx context.Context, slug string) (moduleSettingsPayload, error) {
-	doc, _, updated, err := h.load(ctx, h.pool)
+	doc, updated, err := h.load(ctx, h.pool)
 	if err != nil {
 		return moduleSettingsPayload{}, err
 	}
@@ -509,8 +503,11 @@ func (h *moduleSettingsHandler) forModule(ctx context.Context, slug string) (mod
 			out.Data[key] = v
 		}
 	}
+	set := doc.SMTP != nil && doc.SMTP.PasswordSet
 	if smtp, ok := out.Data["smtp"].(map[string]any); ok {
-		smtp["password_set"] = doc.SMTP != nil && doc.SMTP.PasswordSet
+		smtp["password_set"] = set
+	} else if set {
+		out.Data["smtp"] = map[string]any{"password_set": true}
 	}
 	return out, nil
 }
@@ -530,20 +527,19 @@ func (h *moduleSettingsHandler) integrationGet(w http.ResponseWriter, r *http.Re
 }
 
 // integrationSecrets is GET /api/v1/integrations/module-settings/secrets:
-// the secret values of the calling module's settings. Keys without a value
-// are left out.
+// the SMTP password from Den's secret. Keys without a value are left out.
 func (h *moduleSettingsHandler) integrationSecrets(w http.ResponseWriter, r *http.Request) {
 	if _, ok := auth.EnsureModule(w, r); !ok {
 		return
 	}
-	_, sec, _, err := h.load(r.Context(), h.pool)
+	pw, err := config.SMTPPassword()
 	if err != nil {
 		httperror.Render(w, r, httperror.Internal(err))
 		return
 	}
 	out := map[string]any{}
-	if sec.SMTPPassword != "" {
-		out["smtp"] = map[string]string{"password": sec.SMTPPassword}
+	if pw != "" {
+		out["smtp"] = map[string]string{"password": pw}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, out)
@@ -579,7 +575,7 @@ func (h *moduleSettingsHandler) moduleView(w http.ResponseWriter, r *http.Reques
 // everyone gets the account console and SSO name, admins also the IdP admin
 // console.
 func (h *moduleSettingsHandler) identityLinks(ctx context.Context, admin bool) map[string]string {
-	doc, _, _, err := h.load(ctx, h.pool)
+	doc, _, err := h.load(ctx, h.pool)
 	out := map[string]string{}
 	if err != nil || doc.Identity == nil {
 		return out

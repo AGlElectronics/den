@@ -13,8 +13,7 @@ export type SmtpSettings = {
   port?: number;
   security?: SmtpSecurity;
   username?: string;
-  /** Write-only: a string sets it, null clears it, leaving it out keeps it. */
-  password?: string | null;
+  /** True when DEN_SMTP_PASSWORD (or DEN_SMTP_PASSWORD_FILE) is set. */
   password_set?: boolean;
   from?: string;
   from_name?: string;
@@ -77,7 +76,5 @@ export function compactSettings(data: ModuleSettingsData): ModuleSettingsData {
     }
     return out;
   };
-  const out = clean(data as Record<string, unknown>) as ModuleSettingsData;
-  if (data.smtp?.password === null) out.smtp = { ...(out.smtp ?? {}), password: null };
-  return out;
+  return clean(data as Record<string, unknown>) as ModuleSettingsData;
 }

@@ -227,6 +227,11 @@ func (c *Config) validate() error {
 	if err := c.GroupMatch.Validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	// Fail at startup when the SMTP password is configured wrongly (both
+	// sources set, or the file cannot be read). The value is not kept.
+	if _, err := SMTPPassword(); err != nil {
+		errs = append(errs, err.Error())
+	}
 	if len(errs) > 0 {
 		return errors.New("invalid config: " + strings.Join(errs, "; "))
 	}
@@ -247,6 +252,30 @@ func LoadMigrate() (*MigrateConfig, error) {
 		return nil, errors.New("DATABASE_URL is required")
 	}
 	return &MigrateConfig{DatabaseURL: dsn}, nil
+}
+
+// SMTPPassword is the shared SMTP password paired modules use to log in to
+// the mail server. It is not stored in the database.
+//
+// DEN_SMTP_PASSWORD_FILE, when set, is read on every call so a mounted
+// secret can be replaced without a restart. A trailing newline is removed
+// (secret files often have one). Otherwise DEN_SMTP_PASSWORD is the
+// process environment, which changes only when Den starts again. Empty
+// means the mail server needs no login. Setting both is an error.
+func SMTPPassword() (string, error) {
+	file := strings.TrimSpace(os.Getenv("DEN_SMTP_PASSWORD_FILE"))
+	env := os.Getenv("DEN_SMTP_PASSWORD")
+	if file != "" && env != "" {
+		return "", errors.New("set only one of DEN_SMTP_PASSWORD and DEN_SMTP_PASSWORD_FILE")
+	}
+	if file == "" {
+		return env, nil
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return "", fmt.Errorf("read DEN_SMTP_PASSWORD_FILE: %w", err)
+	}
+	return strings.TrimRight(string(b), "\r\n"), nil
 }
 
 func getEnv(key, fallback string) string {

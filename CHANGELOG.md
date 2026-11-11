@@ -53,7 +53,8 @@ MAJOR is the MAJOR every module is built for
   settings changes, Keycloak syncs, backups, schedule changes and backup
   downloads, each with the person who did it.
 - **Module settings** page (`GET/PUT /api/v1/module-settings`): retention
-  periods (marked pending legal review), SMTP (the password is write-only),
+  periods (marked pending legal review), SMTP (the password is
+  `DEN_SMTP_PASSWORD`, shown as configured or not set),
   Finance seller details, Stash Lost & Found retention, the Rally
   submission-site host and identity links (account console, sign-in name,
   identity provider admin console). Paired modules receive them in the
@@ -177,6 +178,17 @@ MAJOR is the MAJOR every module is built for
 
 ### Changed
 
+- **BREAKING:** The shared SMTP password is no longer stored in Den's
+  database, and `PUT /api/v1/module-settings` rejects `smtp.password`
+  (`422`). Before upgrading, copy the value from `module_settings.secrets`
+  (`smtp_password`) into the secret `DEN_SMTP_PASSWORD` (Kubernetes: that
+  key of `den-secrets`; Docker: the environment variable) or into the file
+  named by `DEN_SMTP_PASSWORD_FILE`. The upgrade drops the column and the
+  stored password. `smtp.password_set` is true when that secret is set.
+  Paired modules still read the password from
+  `GET /api/v1/integrations/module-settings/secrets`. Restart Den after
+  changing `DEN_SMTP_PASSWORD`. A mounted `DEN_SMTP_PASSWORD_FILE` is read
+  on each request, so replacing the file needs no restart.
 - **BREAKING:** Den accepts only access tokens with the audience `den-api`
   (`OIDC_AUDIENCE`). ID tokens are refused, including ones that used to
   work as the bearer. The shipped realm's audience mapper on `den-spa`

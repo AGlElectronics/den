@@ -257,8 +257,7 @@ shared sections and only its own.
 | column            | type        | notes                                  |
 | ----------------- | ----------- | -------------------------------------- |
 | `organization_id` | uuid pk fk  |                                        |
-| `data`            | jsonb       | the sections, without secrets          |
-| `secrets`         | jsonb       | `{"smtp_password": "…"}`; never returned by the admin API |
+| `data`            | jsonb       | the sections; the SMTP password is not here |
 | `updated_at`      | timestamptz |                                        |
 | `updated_by`      | uuid fk     | `users(id)`, set null on delete        |
 
