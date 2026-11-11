@@ -43,6 +43,7 @@ func TestPairingMintRedeemBrand(t *testing.T) {
 	`, orgID, slug).Scan(&moduleID); err != nil {
 		t.Fatalf("insert module: %v", err)
 	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM modules WHERE id = $1`, moduleID) })
 
 	cfg := &config.Config{
 		AppEnv:     "development",

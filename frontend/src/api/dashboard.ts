@@ -30,12 +30,13 @@ export type DashboardHome = {
     typography: Record<string, unknown>;
     copy: Record<string, unknown>;
   };
+  /** The modules this person may use (admins: every usable module). */
   usable_modules: UsableModule[];
-  organizations: number;
-  users: number;
-  modules: number;
-  paired_modules: number;
-  unpaired_modules: number;
+  /** Organisation-wide counts, only sent to admins. */
+  users?: number;
+  modules?: number;
+  paired_modules?: number;
+  unpaired_modules?: number;
 };
 
 export function fetchDashboard(): Promise<DashboardHome> {

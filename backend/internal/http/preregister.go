@@ -16,8 +16,8 @@ import (
 // preregisterInsertSQL never touches an existing row: a conflict returns no
 // row, which is how inserted and already-present modules are told apart.
 const preregisterInsertSQL = `
-		INSERT INTO modules (organization_id, slug, display_name, base_url, environment, enabled, status)
-		VALUES ($1, $2, $3, $4, $5, TRUE, 'unpaired')
+		INSERT INTO modules (organization_id, slug, display_name, base_url, internal_url, environment, enabled, status)
+		VALUES ($1, $2, $3, $4, $5, $6, TRUE, 'unpaired')
 		ON CONFLICT (organization_id, slug, environment) DO NOTHING
 		RETURNING id
 	`
@@ -49,7 +49,7 @@ func PreregisterModules(ctx context.Context, db PreregisterDB, mods []config.Pre
 	for _, m := range mods {
 		var id uuid.UUID
 		err := db.QueryRow(ctx, preregisterInsertSQL,
-			defaultOrgID, m.Slug, m.DisplayName, m.BaseURL, m.Environment).Scan(&id)
+			defaultOrgID, m.Slug, m.DisplayName, m.BaseURL, m.InternalURL, m.Environment).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			res.Existing++
 			continue

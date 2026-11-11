@@ -4,15 +4,19 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/AGlElectronics/den/backend/internal/auth"
 )
 
 // dashboardHandler returns the home-portal payload: org/convention identity,
-// usable (enabled + paired) modules for everyone, and light admin counts.
-func dashboardHandler(pool *pgxpool.Pool) http.HandlerFunc {
+// the usable (enabled + paired) modules the person may use (admins see all),
+// and, for admins only, organisation-wide counts.
+func dashboardHandler(pool *pgxpool.Pool, caller *moduleCaller) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		u, _ := auth.FromContext(ctx)
+		isAdmin := u.HasRoleIn(defaultOrgID, "admin", "owner")
 
 		type orgDTO struct {
 			ID          string `json:"id"`
@@ -35,14 +39,9 @@ func dashboardHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		out := map[string]any{
-			"organization":     nil,
-			"copy":             copyDTO{},
-			"usable_modules":   []moduleDTO{},
-			"organizations":    0,
-			"users":            0,
-			"modules":          0,
-			"paired_modules":   0,
-			"unpaired_modules": 0,
+			"organization":   nil,
+			"copy":           copyDTO{},
+			"usable_modules": []moduleDTO{},
 		}
 
 		if pool == nil {
@@ -51,38 +50,26 @@ func dashboardHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		var (
-			orgID    uuid.UUID
-			slug     string
-			name     string
-			orgs     int64
-			modules  int64
-			paired   int64
-			unpaired int64
-			users    int64
+			orgID = defaultOrgID
+			slug  string
+			name  string
 		)
-		_ = pool.QueryRow(ctx, `
-			SELECT id, slug, display_name FROM organizations
-			 ORDER BY slug ASC
-			 LIMIT 1
-		`).Scan(&orgID, &slug, &name)
-		if orgID != uuid.Nil {
-			out["organization"] = orgDTO{
-				ID:          orgID.String(),
-				Slug:        slug,
-				DisplayName: name,
-			}
+		if err := pool.QueryRow(ctx, `SELECT slug, display_name FROM organizations WHERE id = $1`, orgID).Scan(&slug, &name); err == nil {
+			out["organization"] = orgDTO{ID: orgID.String(), Slug: slug, DisplayName: name}
 		}
 
-		_ = pool.QueryRow(ctx, `SELECT count(*) FROM organizations`).Scan(&orgs)
-		_ = pool.QueryRow(ctx, `SELECT count(*) FROM modules`).Scan(&modules)
-		_ = pool.QueryRow(ctx, `SELECT count(*) FROM modules WHERE status = 'paired'`).Scan(&paired)
-		_ = pool.QueryRow(ctx, `SELECT count(*) FROM modules WHERE status = 'unpaired'`).Scan(&unpaired)
-		_ = pool.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&users)
-		out["organizations"] = orgs
-		out["modules"] = modules
-		out["paired_modules"] = paired
-		out["unpaired_modules"] = unpaired
-		out["users"] = users
+		if isAdmin {
+			var modules, paired, unpaired, users int64
+			_ = pool.QueryRow(ctx, `
+				SELECT count(*), count(*) FILTER (WHERE status = 'paired'), count(*) FILTER (WHERE status = 'unpaired')
+				  FROM modules WHERE organization_id = $1`, orgID).Scan(&modules, &paired, &unpaired)
+			_ = pool.QueryRow(ctx, `
+				SELECT count(DISTINCT user_id) FROM organization_memberships WHERE organization_id = $1`, orgID).Scan(&users)
+			out["modules"] = modules
+			out["paired_modules"] = paired
+			out["unpaired_modules"] = unpaired
+			out["users"] = users
+		}
 
 		var copyRaw, themeRaw, typoRaw []byte
 		err := pool.QueryRow(ctx, `
@@ -119,27 +106,17 @@ func dashboardHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			}
 		}
 
-		rows, err := pool.Query(ctx, `
-			SELECT id, slug, display_name, COALESCE(base_url, ''), environment, status, enabled
-			  FROM modules
-			 WHERE enabled = true
-			   AND status IN ('paired', 'degraded')
-			   AND COALESCE(base_url, '') <> ''
-			 ORDER BY display_name
-		`)
-		if err == nil {
-			defer rows.Close()
-			list := make([]moduleDTO, 0)
-			for rows.Next() {
-				var m moduleDTO
-				var id uuid.UUID
-				if err := rows.Scan(&id, &m.Slug, &m.DisplayName, &m.BaseURL, &m.Environment, &m.Status, &m.Enabled); err != nil {
-					continue
+		if u != nil {
+			if mods, err := caller.visibleModules(ctx, u); err == nil {
+				list := make([]moduleDTO, 0, len(mods))
+				for _, m := range mods {
+					list = append(list, moduleDTO{
+						ID: m.ID.String(), Slug: m.Slug, DisplayName: m.DisplayName, BaseURL: m.BaseURL,
+						Environment: m.Environment, Status: m.Status, Enabled: m.Enabled,
+					})
 				}
-				m.ID = id.String()
-				list = append(list, m)
+				out["usable_modules"] = list
 			}
-			out["usable_modules"] = list
 		}
 
 		writeJSON(w, http.StatusOK, out)

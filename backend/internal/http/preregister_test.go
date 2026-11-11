@@ -62,8 +62,8 @@ func (f *fakeDB) Exec(_ context.Context, sql string, args ...any) (pgconn.Comman
 func TestPreregisterInsertStatement(t *testing.T) {
 	sql := strings.Join(strings.Fields(preregisterInsertSQL), " ")
 	for _, want := range []string{
-		"INSERT INTO modules (organization_id, slug, display_name, base_url, environment, enabled, status)",
-		"VALUES ($1, $2, $3, $4, $5, TRUE, 'unpaired')",
+		"INSERT INTO modules (organization_id, slug, display_name, base_url, internal_url, environment, enabled, status)",
+		"VALUES ($1, $2, $3, $4, $5, $6, TRUE, 'unpaired')",
 		"ON CONFLICT (organization_id, slug, environment) DO NOTHING",
 		"RETURNING id",
 	} {
@@ -100,7 +100,7 @@ func TestPreregisterModulesInsertsOnlyNew(t *testing.T) {
 		t.Fatalf("want 3 inserts, got %d", len(db.queries))
 	}
 	first := db.queries[0].args
-	if first[0] != defaultOrgID || first[1] != "rally" || first[2] != "Rally" || first[3] != "http://rally:8080" || first[4] != "production" {
+	if first[0] != defaultOrgID || first[1] != "rally" || first[2] != "Rally" || first[3] != "http://rally:8080" || first[4] != "" || first[5] != "production" {
 		t.Errorf("unexpected insert args: %v", first)
 	}
 	if len(db.execs) != 2 {

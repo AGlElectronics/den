@@ -19,6 +19,8 @@ type PreregisteredModule struct {
 	Slug        string `json:"slug"`
 	DisplayName string `json:"display_name"`
 	BaseURL     string `json:"base_url"`
+	// InternalURL is the server-to-server address (optional).
+	InternalURL string `json:"internal_url,omitempty"`
 	Environment string `json:"environment,omitempty"`
 }
 
@@ -61,7 +63,8 @@ func ValidateModuleURL(raw string, allowHTTP bool) error {
 }
 
 // ParsePreregisterModules parses DEN_PREREGISTER_MODULES: a JSON array of
-// {"slug","display_name","base_url"[,"environment"]}. Empty means none.
+// {"slug","display_name","base_url"[,"internal_url","environment"]}. Empty
+// means none.
 // allowHTTP accepts http base URLs (APP_ENV=development).
 func ParsePreregisterModules(raw string, allowHTTP bool) ([]PreregisteredModule, error) {
 	raw = strings.TrimSpace(raw)
@@ -84,7 +87,8 @@ func ParsePreregisterModules(raw string, allowHTTP bool) ([]PreregisteredModule,
 		m := &mods[i]
 		m.Slug = strings.TrimSpace(m.Slug)
 		m.DisplayName = strings.TrimSpace(m.DisplayName)
-		m.BaseURL = strings.TrimSpace(m.BaseURL)
+		m.BaseURL = strings.TrimRight(strings.TrimSpace(m.BaseURL), "/")
+		m.InternalURL = strings.TrimRight(strings.TrimSpace(m.InternalURL), "/")
 		m.Environment = strings.TrimSpace(m.Environment)
 		if m.Environment == "" {
 			m.Environment = DefaultModuleEnvironment
@@ -101,6 +105,11 @@ func ParsePreregisterModules(raw string, allowHTTP bool) ([]PreregisteredModule,
 		}
 		if err := ValidateModuleURL(m.BaseURL, allowHTTP); err != nil {
 			errs = append(errs, where+": base_url "+err.Error())
+		}
+		if m.InternalURL != "" {
+			if err := ValidateModuleURL(m.InternalURL, allowHTTP); err != nil {
+				errs = append(errs, where+": internal_url "+err.Error())
+			}
 		}
 		key := m.Slug + "\x00" + m.Environment
 		if prev, dup := seen[key]; dup && m.Slug != "" {

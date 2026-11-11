@@ -86,6 +86,9 @@ type Deps struct {
 	// NewLimiter builds the limiter of one rate-limited route; nil uses an
 	// in-process ratelimit.Memory.
 	NewLimiter func(route string, limit int, window time.Duration) ratelimit.Limiter
+	// ModuleHTTPClient is used for calls to modules (role catalogs, to-dos);
+	// nil uses a client with a 5 second timeout.
+	ModuleHTTPClient *http.Client
 }
 
 // Rate limits per client IP on the routes that need no sign-in.
@@ -167,7 +170,11 @@ func NewRouter(deps Deps, version string) http.Handler {
 	brandH := newBrandingHandler(deps.Pool, deps.Files)
 	pairH := newPairingHandler(deps.Pool, deps.Config.AppBaseURL, deps.Config.CredentialKey)
 	settingsH := &orgSettingsHandler{pool: deps.Pool}
-	prefsH := &preferencesHandler{pool: deps.Pool}
+	caller := newModuleCaller(deps.Pool, deps.Config.IsDevelopment(), deps.Config.CredentialKey, deps.Logger)
+	if deps.ModuleHTTPClient != nil {
+		caller.hc = deps.ModuleHTTPClient
+	}
+	prefsH := &preferencesHandler{pool: deps.Pool, caller: caller, devMode: deps.Config.AuthMode == config.AuthModeDev}
 	auditH := &auditHandler{pool: deps.Pool}
 	kcSync := deps.KeycloakSync
 	if kcSync == nil {
@@ -218,7 +225,8 @@ func NewRouter(deps Deps, version string) http.Handler {
 				secure.Get("/me", meHandler)
 				secure.Get("/me/preferences", prefsH.getMine)
 				secure.Put("/me/preferences", prefsH.putMine)
-				secure.With(auth.RequireRole(defaultOrgID, "member", "admin", "owner")).Get("/dashboard", dashboardHandler(deps.Pool))
+				secure.With(auth.RequireRole(defaultOrgID, "member", "admin", "owner")).Get("/dashboard", dashboardHandler(deps.Pool, caller))
+				secure.With(auth.RequireRole(defaultOrgID, "member", "admin", "owner")).Get("/portal/todos", caller.portalTodos)
 
 				// Admin console APIs: convention admins / owners only.
 				secure.Group(func(admin chi.Router) {

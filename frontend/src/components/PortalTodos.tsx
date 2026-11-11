@@ -73,7 +73,7 @@ function TodoRow({ todo }: { todo: PortalTodo }) {
 
 /** "Your to-dos" across every paired module that implements /api/portal/todos. */
 export function PortalTodos({ modules }: { modules: UsableModule[] }) {
-  const { items, responded, loading } = usePortalTodos(modules);
+  const { items, responded, loading } = usePortalTodos(modules.length > 0);
 
   // No module implements the contract (or none reachable): stay out of the way.
   if (!loading && responded === 0) return null;

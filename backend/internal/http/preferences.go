@@ -17,14 +17,56 @@ import (
 // User preferences are stored in Den and shared by every app, so picking dark
 // mode in Stash also applies in Den, HR and Rally. People use these endpoints
 // in Den; paired modules read and write them for their signed-in user through
-// the integration API.
+// the integration API, limited to people who may use that module.
 //
 //	GET/PUT /api/v1/me/preferences
 //	GET     /api/v1/integrations/user-preferences?issuer=…&subject=…
 //	PUT     /api/v1/integrations/user-preferences   {issuer, subject, theme}
 
 type preferencesHandler struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	caller *moduleCaller
+	// devMode skips the module scope check (AUTH_MODE=dev, everyone is an admin).
+	devMode bool
+}
+
+// errNotModuleUser hides whether Den knows the person at all.
+var errNotModuleUser = httperror.NotFound("person for this module")
+
+// checkModuleUser lets a module read or write only the preferences of its
+// own users: people who signed in to Den at least once, are not disabled and
+// may use the module (portal_visibility everyone, or one of their groups is
+// in the module's role catalog).
+func (h *preferencesHandler) checkModuleUser(ctx context.Context, m *auth.ModulePrincipal, issuer, subject string) error {
+	if h.devMode {
+		return nil
+	}
+	var (
+		groups   []string
+		disabled bool
+	)
+	err := h.pool.QueryRow(ctx, `
+		SELECT u.groups, u.is_disabled
+		  FROM external_identities ei JOIN users u ON u.id = ei.user_id
+		 WHERE ei.issuer = $1 AND ei.subject = $2`, issuer, subject).Scan(&groups, &disabled)
+	if errors.Is(err, pgx.ErrNoRows) || disabled {
+		return errNotModuleUser
+	}
+	if err != nil {
+		return httperror.Internal(err)
+	}
+	var pm portalModule
+	err = h.pool.QueryRow(ctx, `
+		SELECT id, slug, display_name, base_url, internal_url, environment, status, enabled, portal_visibility
+		  FROM modules WHERE id = $1 AND organization_id = $2`, m.ModuleID, defaultOrgID).
+		Scan(&pm.ID, &pm.Slug, &pm.DisplayName, &pm.BaseURL, &pm.InternalURL, &pm.Environment, &pm.Status, &pm.Enabled, &pm.Visibility)
+	if err != nil {
+		return httperror.Internal(err)
+	}
+	if !h.caller.canUse(ctx, groups, pm) {
+		return errNotModuleUser
+	}
+	return nil
 }
 
 type preferencesDTO struct {
@@ -107,12 +149,17 @@ func identityMissing() error {
 }
 
 func (h *preferencesHandler) integrationGet(w http.ResponseWriter, r *http.Request) {
-	if _, ok := auth.EnsureModule(w, r); !ok {
+	m, ok := auth.EnsureModule(w, r)
+	if !ok {
 		return
 	}
 	issuer, subject := r.URL.Query().Get("issuer"), r.URL.Query().Get("subject")
 	if issuer == "" || subject == "" {
 		httperror.Render(w, r, identityMissing())
+		return
+	}
+	if err := h.checkModuleUser(r.Context(), m, issuer, subject); err != nil {
+		httperror.Render(w, r, err)
 		return
 	}
 	p, err := h.load(r.Context(), issuer, subject)
@@ -124,7 +171,8 @@ func (h *preferencesHandler) integrationGet(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *preferencesHandler) integrationPut(w http.ResponseWriter, r *http.Request) {
-	if _, ok := auth.EnsureModule(w, r); !ok {
+	m, ok := auth.EnsureModule(w, r)
+	if !ok {
 		return
 	}
 	var in struct {
@@ -138,6 +186,10 @@ func (h *preferencesHandler) integrationPut(w http.ResponseWriter, r *http.Reque
 	}
 	if in.Issuer == "" || in.Subject == "" {
 		httperror.Render(w, r, identityMissing())
+		return
+	}
+	if err := h.checkModuleUser(r.Context(), m, in.Issuer, in.Subject); err != nil {
+		httperror.Render(w, r, err)
 		return
 	}
 	p, err := h.save(r.Context(), in.Issuer, in.Subject, in.Theme)
