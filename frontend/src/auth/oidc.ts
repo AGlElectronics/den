@@ -1,4 +1,5 @@
-import { UserManager, WebStorageStateStore } from 'oidc-client-ts';
+import { InMemoryWebStorage, UserManager, WebStorageStateStore, type User } from 'oidc-client-ts';
+import { announceSignOut } from '@/auth/channel';
 import { runtimeConfig } from '@/runtime-config';
 
 // Mirrors Stash's OIDC bootstrap: a lazily-constructed UserManager wrapped
@@ -28,6 +29,7 @@ export function getUserManager(): UserManager | null {
   }
   const scope =
     runtimeConfig().oidcScope;
+  dropStoredTokens();
   manager = new UserManager({
     authority,
     client_id,
@@ -38,25 +40,56 @@ export function getUserManager(): UserManager | null {
     automaticSilentRenew: true,
     silent_redirect_uri: `${window.location.origin}/silent-callback.html`,
     monitorSession: true,
-    // Shared by all tabs so a sign-out / user switch reaches every tab (see session.ts).
-    userStore: new WebStorageStateStore({ store: window.localStorage }),
+    // Tokens live only in this tab's memory, never in localStorage or
+    // sessionStorage where injected script could read them. After a reload
+    // restoreSession() gets new ones from the Keycloak session.
+    userStore: new WebStorageStateStore({ store: new InMemoryWebStorage() }),
   });
   return manager;
 }
 
+/** Removes tokens that Den releases before 1.0 kept in localStorage. */
+function dropStoredTokens(): void {
+  try {
+    for (const key of Object.keys(window.localStorage)) {
+      if (key.startsWith('oidc.user:')) window.localStorage.removeItem(key);
+    }
+  } catch {
+    // storage blocked: nothing was stored either
+  }
+}
+
+let restoring: Promise<User | null> | null = null;
+
 /**
- * The Bearer token Den sends to its own API, or null when signed out / not in
- * OIDC mode. Den's backend verifies via go-oidc's IDTokenVerifier (same as
- * Stash), so prefer the ID token: its `aud` is this client, whereas Keycloak
- * access tokens often carry a different `aud`. Paired modules get the same token.
+ * The signed-in user, renewed through a silent sign-in (hidden iframe against
+ * the Keycloak session) when there is none in memory yet or it has expired.
+ * Concurrent callers share one attempt. Resolves to null when Keycloak has no
+ * session for this browser.
  */
-export async function getOidcBearer(): Promise<string | null> {
-  if (!isOidcAuthMode()) return null;
+export async function restoreSession(): Promise<User | null> {
   const mgr = getUserManager();
   if (!mgr) return null;
   const user = await mgr.getUser();
-  if (!user || user.expired) return null;
-  return user.id_token ?? user.access_token ?? null;
+  if (user && !user.expired) return user;
+  restoring ??= mgr
+    .signinSilent()
+    .catch(() => null)
+    .finally(() => {
+      restoring = null;
+    });
+  return restoring;
+}
+
+/**
+ * The access token Den sends to its own API, or null when signed out / not in
+ * OIDC mode. Den accepts access tokens with audience `den-api` only; ID
+ * tokens are refused.
+ */
+export async function getOidcBearer(): Promise<string | null> {
+  if (!isOidcAuthMode()) return null;
+  const user = await restoreSession();
+  return user?.access_token ?? null;
 }
 
 export async function signInWithOidc(returnPath: string): Promise<void> {
@@ -84,5 +117,6 @@ export async function signOutOidc(): Promise<void> {
   if (!mgr) {
     return;
   }
+  announceSignOut();
   await mgr.signoutRedirect();
 }

@@ -121,8 +121,10 @@ services:
       AUTH_MODE: ${AUTH_MODE:-dev}
       DEV_DEFAULT_USER: dev-admin
       OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
-      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
-      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-den-api}
+      OIDC_GROUPS_CLAIM: ${OIDC_GROUPS_CLAIM:-groups}
+      OIDC_GROUP_MATCH: ${OIDC_GROUP_MATCH:-full}
+      OIDC_GROUP_PREFIX: ${OIDC_GROUP_PREFIX:-}
       KEYCLOAK_ADMIN_URL: ${KEYCLOAK_ADMIN_URL:-}
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-}
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-den-keycloak}
@@ -148,6 +150,9 @@ services:
       context: ..
       dockerfile: infra/Dockerfile.frontend
     container_name: den-frontend
+    environment:
+      # Sign-in server for the Content-Security-Policy; empty with dev sign-in.
+      KEYCLOAK_ORIGIN: ${KEYCLOAK_ORIGIN:-}
     volumes:
       # Web app settings (/config.json). Dev sign-in by default; for real
       # sign-in set FRONTEND_CONFIG to your own file (docs: configuration).

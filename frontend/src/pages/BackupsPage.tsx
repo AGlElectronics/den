@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, Download, Loader2, Lock, Play } from 'luci
 import {
   backupNow,
   backupProblem,
+  backupWarning,
   downloadBackup,
   formatBytes,
   getOperationsStatus,
@@ -44,6 +45,7 @@ export function BackupsPage() {
   });
 
   const problem = backupProblem(s);
+  const warning = backupWarning(s);
 
   return (
     <div className="space-y-6">
@@ -72,6 +74,12 @@ export function BackupsPage() {
         <div className="flex items-start gap-2 rounded-lg border border-den-danger-border bg-den-danger-bg p-3 text-sm text-den-danger">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" />
           <span>{problem}</span>
+        </div>
+      )}
+      {warning && (
+        <div className="flex items-start gap-2 rounded-lg border border-den-warn-border bg-den-warn-bg p-3 text-sm text-den-warn">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <span>{warning}</span>
         </div>
       )}
       {now.isError && <p className="text-sm text-den-danger">{(now.error as Error).message}</p>}
@@ -112,9 +120,16 @@ export function BackupsPage() {
           <section className={card}>
             <h2 className="font-heading text-base font-bold">Restoring</h2>
             <p className="mt-1 text-den-foreground/70">
-              Restoring replaces live data, so it is done on the command line rather than with a button. The
-              operations guide (<code>docs/operations.md</code>) walks through it step by step. You need the secret
-              backup key, which is kept outside Con Services.
+              Restoring replaces live data, so it is done on the command line rather than with a button. The{' '}
+              <a
+                className="text-den-primary underline hover:text-den-primary-hover"
+                href="https://aglelectronics.github.io/con-services/operations/databases-and-backups/#restore"
+                target="_blank"
+                rel="noreferrer"
+              >
+                restore guide
+              </a>{' '}
+              walks through it step by step. You need the secret backup key, which is kept outside Con Services.
             </p>
           </section>
         </>

@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 
 import { fetchDashboard } from '@/api/dashboard';
-import { backupProblem, getOperationsStatus } from '@/api/operations';
+import { backupProblem, backupWarning, getOperationsStatus } from '@/api/operations';
 import { useMe } from '@/hooks/useMe';
 import { useApplyBrand } from '@/lib/brand';
 import { cn } from '@/lib/cn';
@@ -49,6 +49,7 @@ export function AdminLayout() {
   useThemeSync('/api/v1/me/preferences');
   const ops = useQuery({ queryKey: ['operations-status'], queryFn: getOperationsStatus, refetchInterval: 60_000 });
   const problem = backupProblem(ops.data);
+  const warning = problem ? undefined : backupWarning(ops.data);
   const links = dash.data?.identity_links;
   const idpConsole = links?.idp_admin_console_url;
 
@@ -81,7 +82,7 @@ export function AdminLayout() {
               >
                 <Icon size={16} />
                 {label}
-                {to === '/admin/backups' && problem && (
+                {to === '/admin/backups' && (problem || warning) && (
                   <AlertTriangle size={14} className="ml-auto text-amber-300" aria-label="Needs attention" />
                 )}
               </Link>
@@ -134,6 +135,15 @@ export function AdminLayout() {
           <div className="flex items-center gap-2 border-b border-den-danger-border bg-den-danger-bg px-8 py-2 text-xs text-den-danger">
             <AlertTriangle size={13} className="shrink-0" />
             <span>{problem}</span>
+            <Link to="/admin/backups" className="ml-auto font-medium underline">
+              Open Backups
+            </Link>
+          </div>
+        )}
+        {warning && !path.startsWith('/admin/backups') && (
+          <div className="flex items-center gap-2 border-b border-den-warn-border bg-den-warn-bg px-8 py-2 text-xs text-den-warn">
+            <AlertTriangle size={13} className="shrink-0" />
+            <span>{warning}</span>
             <Link to="/admin/backups" className="ml-auto font-medium underline">
               Open Backups
             </Link>

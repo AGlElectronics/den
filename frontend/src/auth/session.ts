@@ -1,28 +1,18 @@
 import type { User } from 'oidc-client-ts';
 
 import { setUnauthorizedHandler } from '@/api/client';
+import { announceSignOut, announceUser, onAuthMessage } from '@/auth/channel';
 import { getUserManager } from '@/auth/oidc';
 
 /*
- * Keeps every tab on the identity Keycloak currently has. The OIDC user lives
- * in localStorage (shared by all tabs of this app), so:
+ * Keeps every tab on the identity Keycloak currently has. Each tab holds its
+ * tokens in memory and tells the others (see channel.ts) who is signed in:
  *  - another tab signs out            -> this tab goes to the login page
  *  - another tab signs in as someone  -> this tab reloads as that person
  *  - Keycloak session ends elsewhere   -> session monitor signs this tab out
  *  - the API answers 401               -> back to the login page
  * Without this, a tab kept a stale admin token after a user switch.
  */
-
-const USER_KEY_PREFIX = 'oidc.user:';
-
-function subOf(raw: string | null): string | undefined {
-  if (!raw) return undefined;
-  try {
-    return (JSON.parse(raw) as { profile?: { sub?: string } }).profile?.sub;
-  } catch {
-    return undefined;
-  }
-}
 
 export function goToLogin(): void {
   const path = `${window.location.pathname}${window.location.search}`;
@@ -38,32 +28,27 @@ export function installSessionSync(): void {
   installed = true;
 
   let currentSub: string | undefined;
-  void mgr.getUser().then((u) => {
-    currentSub = u?.profile.sub;
-  });
   mgr.events.addUserLoaded((u: User) => {
+    const changed = u.profile.sub !== currentSub;
     currentSub = u.profile.sub;
+    if (changed) announceUser(u.profile.sub);
   });
 
-  window.addEventListener('storage', (e) => {
-    if (e.storageArea !== window.localStorage) return;
-    if (e.key !== null && !e.key.startsWith(USER_KEY_PREFIX)) return;
-    const next = e.key === null ? undefined : subOf(e.newValue);
-    if (next === currentSub) return; // token refresh for the same person
-    if (next === undefined) {
-      goToLogin();
-    } else {
+  onAuthMessage((msg) => {
+    if (msg.type === 'signed-out') {
+      void mgr.removeUser().finally(goToLogin);
+    } else if (currentSub !== undefined && msg.sub !== currentSub) {
       window.location.reload();
     }
   });
 
   const endSession = () => {
+    announceSignOut();
     void mgr.removeUser().finally(goToLogin);
   };
   mgr.events.addUserSignedOut(endSession);
   // Same person, new Keycloak session (signed out and back in elsewhere): adopt
-  // it silently. A reload would loop, because the stored user keeps the old
-  // session_state and the monitor reports "changed" again on every load.
+  // it silently instead of reloading.
   mgr.events.addUserSessionChanged(() => {
     void mgr.signinSilent().catch(endSession);
   });

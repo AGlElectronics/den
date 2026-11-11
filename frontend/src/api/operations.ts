@@ -44,6 +44,8 @@ export type OperationsStatus =
       next_run?: string;
       running?: string;
       problem?: string;
+      same_storage_as_data?: boolean;
+      warning?: string;
       databases: ServerDatabase[];
     };
 
@@ -96,4 +98,10 @@ export function backupProblem(s: OperationsStatus | undefined): string | undefin
   if (!s.reachable) return `Backups can't be checked: ${s.error}`;
   if (!s.backups_enabled) return undefined;
   return s.problem;
+}
+
+/** Backups work but are set up riskily (for example on the live data's storage). */
+export function backupWarning(s: OperationsStatus | undefined): string | undefined {
+  if (!s || !s.configured || !s.reachable || !s.backups_enabled) return undefined;
+  return s.warning;
 }

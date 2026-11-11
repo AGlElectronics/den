@@ -8,7 +8,7 @@ import {
 
 import { Layout } from '@/components/Layout';
 import { AdminLayout } from '@/components/AdminLayout';
-import { getUserManager, isOidcAuthMode } from '@/auth/oidc';
+import { getUserManager, isOidcAuthMode, restoreSession } from '@/auth/oidc';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { OrganizePage } from '@/pages/OrganizePage';
 import { ModulesPage } from '@/pages/ModulesPage';
@@ -48,22 +48,15 @@ const oidcCallbackRoute = createRoute({
 
 async function requireSession() {
   // Dev mode: the API accepts X-Dev-User so nothing to gate on the SPA
-  // side. OIDC mode: redirect to /login unless we have a non-expired user.
+  // side. OIDC mode: tokens are only kept in memory, so after a reload the
+  // user comes back through a silent sign-in; /login only when that fails.
   if (!isOidcAuthMode()) {
     return;
   }
-  const mgr = getUserManager();
-  if (!mgr) {
+  if (!getUserManager()) {
     throw redirect({ to: '/login', search: { redirect: '/dashboard' } });
   }
-  let user = await mgr.getUser();
-  if (user?.expired) {
-    try {
-      user = await mgr.signinSilent();
-    } catch {
-      user = null;
-    }
-  }
+  const user = await restoreSession();
   if (!user) {
     const path =
       typeof window !== 'undefined' ? `${window.location.pathname}${window.location.search}` : '/dashboard';

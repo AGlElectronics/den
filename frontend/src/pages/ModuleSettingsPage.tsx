@@ -7,8 +7,11 @@ import {
   compactSettings,
   getModuleSettings,
   putModuleSettings,
-  type LostAndFound,
+  type LostFound,
   type ModuleSettingsData,
+  type SellerSettings,
+  type SmtpSecurity,
+  type TasksSettings,
 } from '@/api/moduleSettings';
 
 const input = 'mt-1 w-full rounded-md border border-den-border bg-den-surface px-2 py-1';
@@ -62,8 +65,13 @@ export function ModuleSettingsPage() {
 
   const set = <K extends keyof ModuleSettingsData>(section: K, patch: Partial<NonNullable<ModuleSettingsData[K]>>) =>
     setD((cur) => ({ ...cur, [section]: { ...(cur[section] ?? {}), ...patch } }));
-  const lf = d.stash?.lost_and_found;
-  const setLF = (v: LostAndFound | undefined) => setD((cur) => ({ ...cur, stash: { ...(cur.stash ?? {}), lost_and_found: v } }));
+  const lf = d.stash?.lost_found;
+  const setLF = (v: LostFound | undefined) => setD((cur) => ({ ...cur, stash: { ...(cur.stash ?? {}), lost_found: v } }));
+  const seller: SellerSettings = d.finance?.seller ?? {};
+  const setSeller = (patch: Partial<SellerSettings>) =>
+    setD((cur) => ({ ...cur, finance: { ...(cur.finance ?? {}), seller: { ...(cur.finance?.seller ?? {}), ...patch } } }));
+  const setTasks = <K extends keyof TasksSettings>(part: K, patch: Partial<NonNullable<TasksSettings[K]>>) =>
+    setD((cur) => ({ ...cur, tasks: { ...(cur.tasks ?? {}), [part]: { ...(cur.tasks?.[part] ?? {}), ...patch } } }));
 
   return (
     <form
@@ -121,9 +129,6 @@ export function ModuleSettingsPage() {
               onChange={(e) => set('retention', { module_data_days: num(e.target.value) })} />
           </Field>
         </div>
-        <Field label="Note about backups" hint="Shown with the retention periods, e.g. how long backups keep deleted data." error={errors['retention.backup_note']}>
-          <textarea className={input} rows={2} value={d.retention?.backup_note ?? ''} onChange={(e) => set('retention', { backup_note: e.target.value })} />
-        </Field>
       </section>
 
       <section className={card}>
@@ -135,8 +140,19 @@ export function ModuleSettingsPage() {
           <Field label="Port" error={errors['smtp.port']}>
             <input className={input} inputMode="numeric" value={d.smtp?.port ?? ''} placeholder="587" onChange={(e) => set('smtp', { port: num(e.target.value) })} />
           </Field>
-          <Field label="Sender" error={errors['smtp.from']}>
-            <input className={input} value={d.smtp?.from ?? ''} placeholder="Example Con <noreply@example.org>" onChange={(e) => set('smtp', { from: e.target.value })} />
+          <Field label="Encryption" hint="STARTTLS on port 587 or TLS on port 465." error={errors['smtp.security']}>
+            <select className={input} value={d.smtp?.security ?? ''} onChange={(e) => set('smtp', { security: (e.target.value || undefined) as SmtpSecurity | undefined })}>
+              <option value="">STARTTLS (default)</option>
+              <option value="starttls">STARTTLS</option>
+              <option value="tls">TLS</option>
+              <option value="none">None (development only)</option>
+            </select>
+          </Field>
+          <Field label="Sender address" error={errors['smtp.from']}>
+            <input className={input} value={d.smtp?.from ?? ''} placeholder="noreply@example.org" onChange={(e) => set('smtp', { from: e.target.value })} />
+          </Field>
+          <Field label="Sender name" error={errors['smtp.from_name']}>
+            <input className={input} value={d.smtp?.from_name ?? ''} placeholder="Example Con" onChange={(e) => set('smtp', { from_name: e.target.value })} />
           </Field>
           <Field label="User name" error={errors['smtp.username']}>
             <input className={input} value={d.smtp?.username ?? ''} autoComplete="off" onChange={(e) => set('smtp', { username: e.target.value })} />
@@ -160,45 +176,91 @@ export function ModuleSettingsPage() {
         <h2 className="font-heading text-base font-bold">Finance: seller details</h2>
         <p className="text-xs text-den-foreground/60">Printed on invoices and receipts. Only the Finance module receives them.</p>
         <div className="grid gap-3 md:grid-cols-2">
-          <Field label="Seller name" error={errors['finance.seller_name']}>
-            <input className={input} value={d.finance?.seller_name ?? ''} onChange={(e) => set('finance', { seller_name: e.target.value })} />
+          <Field label="Legal name" error={errors['finance.seller.legal_name']}>
+            <input className={input} value={seller.legal_name ?? ''} placeholder="Example Con e.V." onChange={(e) => setSeller({ legal_name: e.target.value })} />
           </Field>
-          <Field label="VAT number" error={errors['finance.vat_number']}>
-            <input className={input} value={d.finance?.vat_number ?? ''} placeholder="NL123456789B01" onChange={(e) => set('finance', { vat_number: e.target.value })} />
+          <Field label="Country" hint="Two-letter code, for example AT." error={errors['finance.seller.country']}>
+            <input className={input} value={seller.country ?? ''} maxLength={2} placeholder="AT" onChange={(e) => setSeller({ country: e.target.value.toUpperCase() })} />
+          </Field>
+          <Field label="VAT ID" error={errors['finance.seller.vat_id']}>
+            <input className={input} value={seller.vat_id ?? ''} placeholder="ATU12345678" onChange={(e) => setSeller({ vat_id: e.target.value })} />
+          </Field>
+          <Field label="Tax number" error={errors['finance.seller.tax_number']}>
+            <input className={input} value={seller.tax_number ?? ''} onChange={(e) => setSeller({ tax_number: e.target.value })} />
+          </Field>
+          <Field label="Registration" hint="Register and number, for example ZVR 123456789." error={errors['finance.seller.registration']}>
+            <input className={input} value={seller.registration ?? ''} onChange={(e) => setSeller({ registration: e.target.value })} />
+          </Field>
+          <Field label="E-mail" error={errors['finance.seller.email']}>
+            <input className={input} value={seller.email ?? ''} placeholder="finance@example.org" onChange={(e) => setSeller({ email: e.target.value })} />
+          </Field>
+          <Field label="Website" error={errors['finance.seller.website']}>
+            <input className={input} value={seller.website ?? ''} placeholder="https://example.org" onChange={(e) => setSeller({ website: e.target.value })} />
           </Field>
         </div>
-        <Field label="Address" error={errors['finance.seller_address']}>
-          <textarea className={input} rows={2} value={d.finance?.seller_address ?? ''} onChange={(e) => set('finance', { seller_address: e.target.value })} />
+        <Field label="Address" error={errors['finance.seller.address']}>
+          <textarea className={input} rows={2} value={seller.address ?? ''} onChange={(e) => setSeller({ address: e.target.value })} />
         </Field>
       </section>
 
       <section className={card}>
         <h2 className="font-heading text-base font-bold">Stash: Lost &amp; Found</h2>
         <div className="grid gap-3 md:grid-cols-2">
-          <Field label="Found items are" error={errors['stash.lost_and_found.mode']}>
+          <Field label="Found items are" error={errors['stash.lost_found.mode']}>
             <select
               className={input}
               value={lf?.mode ?? ''}
               onChange={(e) => {
                 const v = e.target.value;
-                setLF(v === 'days_after_con' ? { mode: v, days: 30 } : v === 'hours_after_closing' ? { mode: v, hours: 48 } : undefined);
+                setLF(v === 'kept_after_con' ? { mode: v, days: 30 } : v === 'deleted_after_closing' ? { mode: v, hours: 48 } : undefined);
               }}
             >
               <option value="">decided by Stash</option>
-              <option value="days_after_con">kept for a number of days after the con</option>
-              <option value="hours_after_closing">deleted a number of hours after closing</option>
+              <option value="kept_after_con">kept for a number of days after the con</option>
+              <option value="deleted_after_closing">deleted a number of hours after closing</option>
             </select>
           </Field>
-          {lf?.mode === 'days_after_con' && (
-            <Field label="Days after the con" error={errors['stash.lost_and_found.days']}>
-              <input className={input} inputMode="numeric" value={lf.days ?? ''} onChange={(e) => setLF({ mode: 'days_after_con', days: num(e.target.value) })} />
+          {lf?.mode === 'kept_after_con' && (
+            <Field label="Days after the con" error={errors['stash.lost_found.days']}>
+              <input className={input} inputMode="numeric" value={lf.days ?? ''} onChange={(e) => setLF({ mode: 'kept_after_con', days: num(e.target.value) })} />
             </Field>
           )}
-          {lf?.mode === 'hours_after_closing' && (
-            <Field label="Hours after closing" error={errors['stash.lost_and_found.hours']}>
-              <input className={input} inputMode="numeric" value={lf.hours ?? ''} onChange={(e) => setLF({ mode: 'hours_after_closing', hours: num(e.target.value) })} />
+          {lf?.mode === 'deleted_after_closing' && (
+            <Field label="Hours after closing" error={errors['stash.lost_found.hours']}>
+              <input className={input} inputMode="numeric" value={lf.hours ?? ''} onChange={(e) => setLF({ mode: 'deleted_after_closing', hours: num(e.target.value) })} />
             </Field>
           )}
+        </div>
+      </section>
+
+      <section className={card}>
+        <h2 className="font-heading text-base font-bold">Wiki</h2>
+        <Field label="Keep old page versions (days)" hint="Older revisions are deleted; the current version is always kept. 0 = keep all." error={errors['wiki.revision_retention_days']}>
+          <input className={input} inputMode="numeric" value={d.wiki?.revision_retention_days ?? ''}
+            onChange={(e) => set('wiki', { revision_retention_days: num(e.target.value) })} />
+        </Field>
+      </section>
+
+      <section className={card}>
+        <h2 className="font-heading text-base font-bold">Tasks</h2>
+        <div className="grid gap-3 md:grid-cols-3">
+          {(
+            [
+              ['trash_days', 'Trash (days)', 'Deleted tasks are purged after this. 0 = never.'],
+              ['notification_days', 'Read notifications (days)', 'Read Inbox notifications are kept this long. 0 = forever.'],
+              ['audit_days', 'Audit log (days)', 'Audit log entries are kept this long. 0 = forever.'],
+              ['automation_run_days', 'Automation runs (days)', 'Automation run history is kept this long. 0 = forever.'],
+            ] as const
+          ).map(([key, label, hint]) => (
+            <Field key={key} label={label} hint={hint} error={errors[`tasks.retention.${key}`]}>
+              <input className={input} inputMode="numeric" value={d.tasks?.retention?.[key] ?? ''}
+                onChange={(e) => setTasks('retention', { [key]: num(e.target.value) })} />
+            </Field>
+          ))}
+          <Field label="Due-soon reminder (days before)" hint="0 = no reminders, at most 30." error={errors['tasks.reminders.due_soon_days']}>
+            <input className={input} inputMode="numeric" value={d.tasks?.reminders?.due_soon_days ?? ''}
+              onChange={(e) => setTasks('reminders', { due_soon_days: num(e.target.value) })} />
+          </Field>
         </div>
       </section>
 
