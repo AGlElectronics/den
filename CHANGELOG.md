@@ -116,6 +116,16 @@ MAJOR is the MAJOR every module is built for
   backend reach the operator. Helm chart `deploy/charts/den` `1.0.0` in
   `con-services`, released with the tag `den/v1.0.0`. See the
   [documentation](https://aglelectronics.github.io/con-services/getting-started/den-quickstart/).
+- Paired modules can list the organisation's enabled, paired modules
+  (`GET /api/v1/integrations/modules`, the caller's pairing credential).
+  Each entry has the slug, name, public address, in-cluster address and
+  `role_catalog_url` (the in-cluster address when set, otherwise the public
+  address, plus `/api/role-catalog`; empty when the module has no address).
+  Disabled modules, unpaired modules and modules whose credentials are all
+  revoked are left out. A missing or revoked credential is
+  `401 unauthorized`. The route is limited to 120 requests a minute per
+  client address. HR uses the list to find role catalogs. See the
+  [API reference](https://aglelectronics.github.io/con-services/modules/den/api/#get-apiv1integrationsmodules).
 - Development: `infra/docker-compose.yml` with SeaweedFS as the S3 server
   (`localhost:9010`, bucket `den-data-dev`), and
   `infra/frontend-config/compose.json` (dev sign-in) mounted as the web
@@ -133,11 +143,12 @@ MAJOR is the MAJOR every module is built for
   older credential of the module at once. Runbook for a leaked pairing URL
   or credential:
   [Disaster recovery](https://aglelectronics.github.io/con-services/operations/disaster-recovery/).
-- Rate limits: 10 pairing redeems, 120 public brand requests and 10 backup
-  downloads a minute per client address (an IPv6 client counts as its `/64`
-  network), and 600 requests a minute per signed-in person. Over the limit
-  Den answers `429 rate_limited` with `Retry-After`. JSON bodies over 1 MiB
-  get `413 request_too_large`.
+- Rate limits: 10 pairing redeems, 120 public brand requests, 120
+  paired-module list requests (`GET /api/v1/integrations/modules`) and 10
+  backup downloads a minute per client address (an IPv6 client counts as
+  its `/64` network), and 600 requests a minute per signed-in person. Over
+  the limit Den answers `429 rate_limited` with `Retry-After`. JSON bodies
+  over 1 MiB get `413 request_too_large`.
 - Branding uploads accept only the roles `logo`, `favicon` and
   `login-background` and only PNG, JPEG, WebP, ICO and SVG files, recognised
   from their content. Assets are served with `X-Content-Type-Options:
@@ -230,6 +241,12 @@ MAJOR is the MAJOR every module is built for
   status then includes `same_storage_as_data: true` and a `warning`, which
   the Backups page and the admin area show. Point the backup bucket at
   another provider or account and set the flag to `false`.
+- The web app nginx includes the shared
+  `security-headers-frame-self.conf` for `/silent-callback.html` (same-origin
+  framing for silent sign-in). The image copies that template instead of
+  rewriting the main policy with `sed`, and `EXTRA_FRAME_SRC` is in the
+  envsubst filter (empty: Den does not frame sandboxed HTML). The Helm
+  chart and the Kustomize nginx config include the same snippet.
 - The Helm chart (still `1.0.0`, unreleased) sets `OIDC_AUDIENCE` to
   `den-api`, `OIDC_GROUPS_CLAIM` and `OIDC_GROUP_MATCH`,
   `BACKUP_SAME_STORAGE_AS_DATA`, and `frontend.securityHeaders`

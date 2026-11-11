@@ -43,7 +43,7 @@ func TestLimiterCanBeReplaced(t *testing.T) {
 	if r.Hdr.Get("Retry-After") != "30" {
 		t.Fatalf("Retry-After %q", r.Hdr.Get("Retry-After"))
 	}
-	for _, want := range []string{"pairing-redeem", "public-brand", "backup-download"} {
+	for _, want := range []string{"pairing-redeem", "public-brand", "backup-download", "integration-modules"} {
 		if !routes[want] {
 			t.Errorf("limiter for %s not requested", want)
 		}

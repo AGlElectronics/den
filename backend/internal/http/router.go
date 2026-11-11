@@ -54,6 +54,7 @@
 //	GET  /api/v1/backup-downloads/{token}             — one-time backup download link
 //
 //	Module-bearer auth (Authorization: Bearer <module credential>):
+//	GET /api/v1/integrations/modules                  — enabled, paired modules (rate-limited per client IP)
 //	GET /api/v1/integrations/branding/profile
 //	GET /api/v1/integrations/branding/assets
 //	GET /api/v1/integrations/branding/assets/{id}
@@ -108,10 +109,11 @@ var rateLimits = map[string]struct {
 	limit  int
 	window time.Duration
 }{
-	"pairing-redeem":  {10, time.Minute},
-	"public-brand":    {120, time.Minute},
-	"backup-download": {10, time.Minute},
-	"signed-in":       {600, time.Minute},
+	"pairing-redeem":      {10, time.Minute},
+	"public-brand":        {120, time.Minute},
+	"backup-download":     {10, time.Minute},
+	"integration-modules": {120, time.Minute},
+	"signed-in":           {600, time.Minute},
 }
 
 // limitRoute is the rate-limit hook of one route; keyOf picks the bucket.
@@ -229,6 +231,12 @@ func NewRouter(deps Deps, version string) http.Handler {
 			// /integrations/* is bearer-authenticated.
 			v1.Route("/integrations", func(integ chi.Router) {
 				integ.With(limitRoute(deps, "pairing-redeem", ratelimit.ByClientIP)).Post("/pairing/redeem", pairH.redeem)
+				// Listed before the bearer group so the address limit runs
+				// before the credential check: a flood of bad credentials
+				// is refused with 429, and a rejected credential under the
+				// limit is still 401.
+				integ.With(limitRoute(deps, "integration-modules", ratelimit.ByClientIP), moduleAuth).
+					Get("/modules", modH.integrationModules)
 
 				integ.Group(func(bearer chi.Router) {
 					bearer.Use(moduleAuth)
