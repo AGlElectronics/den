@@ -104,4 +104,3 @@ func renderOps(w http.ResponseWriter, r *http.Request, err error) {
 	}
 	httperror.Render(w, r, httperror.Internal(err))
 }
-

@@ -6,18 +6,25 @@
 //	GET  /livez                                        — process liveness, never touches DB
 //	GET  /readyz                                       — ready for traffic (requires DB ping)
 //	GET  /api/health                                   — human-friendly health, like Stash's
+//	GET  /api/role-catalog                             — Den's roles and their IdP groups
 //
-//	Authenticated (human UI, dev-header or OIDC):
+//	Signed in (human UI, dev-header or OIDC):
 //	GET    /api/v1/me
 //	GET    /api/v1/me/preferences
 //	PUT    /api/v1/me/preferences                — theme: system | light | dark
-//	GET    /api/v1/dashboard
+//	GET    /api/v1/dashboard                     — member, admin
+//	GET    /api/v1/portal/todos                  — member, admin; Den asks the modules
+//
+//	Admin (admin, owner):
 //	GET    /api/v1/modules
 //	POST   /api/v1/modules
 //	GET    /api/v1/modules/{id}
 //	PATCH  /api/v1/modules/{id}
-//	DELETE /api/v1/modules/{id}
+//	DELETE /api/v1/modules/{id}                  — ?database=drop&confirm=<slug> also needs ops
 //	POST   /api/v1/modules/{id}/pairing-tokens   — mints a one-shot pairing URL
+//	GET    /api/v1/modules/{id}/credentials
+//	DELETE /api/v1/modules/{id}/credentials      — revoke every active credential
+//	DELETE /api/v1/modules/{id}/credentials/{credentialID}
 //	GET    /api/v1/brand/profile
 //	PUT    /api/v1/brand/profile
 //	GET    /api/v1/brand/assets
@@ -26,18 +33,20 @@
 //	DELETE /api/v1/brand/assets/{id}
 //	GET    /api/v1/org-settings
 //	PUT    /api/v1/org-settings
-//	GET    /api/v1/keycloak-sync                 — login branding push status
-//	POST   /api/v1/keycloak-sync                 — push branding to Keycloak now
-//	GET    /api/v1/operations/status             — databases + backup status (operator)
+//	GET    /api/v1/module-settings
+//	PUT    /api/v1/module-settings
+//	GET    /api/v1/keycloak-sync                 — realm display name sync status
+//	POST   /api/v1/keycloak-sync                 — sync the realm display name now
+//	GET    /api/v1/audit-events
+//	GET    /api/v1/operations/status             — databases + backup status (also ops)
+//
+//	Ops (the ops role):
 //	PUT    /api/v1/operations/settings           — backup hour + retention
 //	GET    /api/v1/operations/backups
 //	POST   /api/v1/operations/backups            — back up now
 //	POST   /api/v1/operations/backups/download-link
 //
-//	DELETE /api/v1/modules/{id}?database=drop&confirm=<slug> also drops the
-//	module's database (backed up first); without it the data is kept.
-//
-//	Public:
+//	Public (rate-limited per client IP):
 //	POST /api/v1/integrations/pairing/redeem?token=... — one-shot token → credential
 //	GET  /api/v1/public/brand                         — brand bundle for login screens
 //	GET  /api/v1/public/brand/assets/{role}           — newest asset of a role (logo, …)
@@ -48,8 +57,9 @@
 //	GET /api/v1/integrations/branding/assets
 //	GET /api/v1/integrations/branding/assets/{id}
 //	GET /api/v1/integrations/settings
+//	GET /api/v1/integrations/module-settings
 //	GET /api/v1/integrations/bundle                   — brand + settings in one call
-//	GET/PUT /api/v1/integrations/user-preferences     — a person's theme choice
+//	GET/PUT /api/v1/integrations/user-preferences     — theme of one of the module's users
 package http
 
 import (
