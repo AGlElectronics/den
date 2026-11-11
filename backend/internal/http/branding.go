@@ -1,13 +1,13 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"path"
 	"strings"
 	"time"
 
@@ -16,8 +16,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/AGlElectronics/den/backend/internal/audit"
 	"github.com/AGlElectronics/den/backend/internal/auth"
-	"github.com/AGlElectronics/den/backend/internal/files"
 	"github.com/AGlElectronics/den/backend/internal/httperror"
 )
 
@@ -33,7 +33,7 @@ import (
 
 type brandingHandler struct {
 	pool  *pgxpool.Pool
-	files *files.Client
+	files AssetStore
 	// onChange runs after the profile or an asset changes (e.g. to resync Keycloak).
 	onChange func()
 }
@@ -44,7 +44,7 @@ func (h *brandingHandler) changed() {
 	}
 }
 
-func newBrandingHandler(pool *pgxpool.Pool, filesClient *files.Client) *brandingHandler {
+func newBrandingHandler(pool *pgxpool.Pool, filesClient AssetStore) *brandingHandler {
 	return &brandingHandler{pool: pool, files: filesClient}
 }
 
@@ -182,7 +182,7 @@ func (h *brandingHandler) streamAsset(w http.ResponseWriter, r *http.Request, as
 	}
 	defer func() { _ = rc.Close() }()
 
-	w.Header().Set("Content-Type", contentType)
+	setAssetHeaders(w, contentType)
 	if sizeBytes > 0 {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", sizeBytes))
 	}
@@ -238,21 +238,35 @@ func (h *brandingHandler) humanPutProfile(w http.ResponseWriter, r *http.Request
 	typography := []byte(ensureJSONObject(in.Typography))
 	copyJSON := []byte(ensureJSONObject(in.Copy))
 
-	// New revision = max(revision)+1.
 	var nextRevision int
-	if err := h.pool.QueryRow(r.Context(),
-		`SELECT COALESCE(MAX(revision), 0) + 1 FROM branding_profiles WHERE organization_id = $1`,
-		defaultOrgID).Scan(&nextRevision); err != nil {
-		httperror.Render(w, r, httperror.Internal(err))
-		return
-	}
-
-	_, err := h.pool.Exec(r.Context(), `
-		INSERT INTO branding_profiles (organization_id, revision, theme, typography, copy, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`, defaultOrgID, nextRevision, theme, typography, copyJSON, auth.ActorID(r.Context()))
+	err := auth.WithTx(r.Context(), h.pool, func(tx pgx.Tx) error {
+		// New revision = max(revision)+1; the lock serialises concurrent saves.
+		if _, err := tx.Exec(r.Context(), `SELECT id FROM organizations WHERE id = $1 FOR UPDATE`, defaultOrgID); err != nil {
+			return err
+		}
+		var prev int
+		if err := tx.QueryRow(r.Context(),
+			`SELECT COALESCE(MAX(revision), 0) FROM branding_profiles WHERE organization_id = $1`,
+			defaultOrgID).Scan(&prev); err != nil {
+			return err
+		}
+		nextRevision = prev + 1
+		var id uuid.UUID
+		if err := tx.QueryRow(r.Context(), `
+			INSERT INTO branding_profiles (organization_id, revision, theme, typography, copy, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			RETURNING id
+		`, defaultOrgID, nextRevision, theme, typography, copyJSON, auth.ActorID(r.Context())).Scan(&id); err != nil {
+			return err
+		}
+		return audit.Write(r.Context(), tx, audit.Event{
+			OrgID: orgRef(), Action: "branding.profile.update", EntityType: "branding_profile", EntityID: id,
+			Before: map[string]any{"revision": prev},
+			After:  map[string]any{"revision": nextRevision, "theme": in.Theme, "typography": in.Typography, "copy": in.Copy},
+		})
+	})
 	if err != nil {
-		httperror.Render(w, r, httperror.Internal(err))
+		httperror.Render(w, r, err)
 		return
 	}
 
@@ -292,8 +306,8 @@ func (h *brandingHandler) humanUploadAsset(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	role := strings.TrimSpace(r.FormValue("role"))
-	if role == "" {
-		httperror.Render(w, r, httperror.Validation("role is required", nil))
+	if !assetRoles[role] {
+		httperror.Render(w, r, httperror.Validation("validation failed", map[string]string{"role": "must be logo, favicon or login-background"}))
 		return
 	}
 	file, header, err := r.FormFile("file")
@@ -302,28 +316,48 @@ func (h *brandingHandler) humanUploadAsset(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer func() { _ = file.Close() }()
-
-	ext := strings.ToLower(path.Ext(header.Filename))
-	storageKey := fmt.Sprintf("branding/%s/%s/%s%s", defaultOrgID, role, uuid.NewString(), ext)
-	contentType := header.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "application/octet-stream"
+	if header.Size > maxBrandingAssetBytes {
+		httperror.Render(w, r, httperror.Validation("validation failed", map[string]string{"file": "must be at most 10 MB"}))
+		return
 	}
+
+	head := make([]byte, 1024)
+	n, err := io.ReadFull(file, head)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
+		httperror.Render(w, r, httperror.BadRequest("could not read the file"))
+		return
+	}
+	head = head[:n]
+	contentType := detectAssetType(head, header.Filename, header.Header.Get("Content-Type"))
+	if contentType == "" {
+		httperror.Render(w, r, httperror.Validation("validation failed", map[string]string{"file": "must be a PNG, JPEG, WebP, ICO or SVG image"}))
+		return
+	}
+
+	storageKey := fmt.Sprintf("branding/%s/%s/%s%s", defaultOrgID, role, uuid.NewString(), assetExtension[contentType])
 
 	// Hard cap mirror of ParseMultipartForm's limit so a lying header
 	// cannot smuggle more bytes in.
-	body := io.LimitReader(file, maxBrandingAssetBytes+1)
+	body := io.LimitReader(io.MultiReader(bytes.NewReader(head), file), maxBrandingAssetBytes+1)
 	if err := h.files.PutObject(r.Context(), storageKey, body, header.Size, contentType); err != nil {
 		httperror.Render(w, r, httperror.Internal(err))
 		return
 	}
 
 	var id uuid.UUID
-	err = h.pool.QueryRow(r.Context(), `
-		INSERT INTO branding_assets (organization_id, role, storage_bucket, storage_key, content_type, size_bytes, uploaded_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id
-	`, defaultOrgID, role, h.files.Bucket(), storageKey, contentType, header.Size, auth.ActorID(r.Context())).Scan(&id)
+	err = auth.WithTx(r.Context(), h.pool, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(r.Context(), `
+			INSERT INTO branding_assets (organization_id, role, storage_bucket, storage_key, content_type, size_bytes, uploaded_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+			RETURNING id
+		`, defaultOrgID, role, h.files.Bucket(), storageKey, contentType, header.Size, auth.ActorID(r.Context())).Scan(&id); err != nil {
+			return err
+		}
+		return audit.Write(r.Context(), tx, audit.Event{
+			OrgID: orgRef(), Action: "branding.asset.create", EntityType: "branding_asset", EntityID: id,
+			After: map[string]any{"role": role, "content_type": contentType, "size_bytes": header.Size, "filename": header.Filename},
+		})
+	})
 	if err != nil {
 		// best-effort rollback of the uploaded bytes
 		_ = h.files.Remove(r.Context(), storageKey)
@@ -345,19 +379,24 @@ func (h *brandingHandler) humanDeleteAsset(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var key string
-	err = h.pool.QueryRow(r.Context(),
-		`SELECT storage_key FROM branding_assets WHERE id = $1 AND organization_id = $2`,
-		id, defaultOrgID).Scan(&key)
-	if err != nil {
+	err = auth.WithTx(r.Context(), h.pool, func(tx pgx.Tx) error {
+		var role string
+		err := tx.QueryRow(r.Context(),
+			`DELETE FROM branding_assets WHERE id = $1 AND organization_id = $2 RETURNING storage_key, role`,
+			id, defaultOrgID).Scan(&key, &role)
 		if errors.Is(err, pgx.ErrNoRows) {
-			httperror.Render(w, r, httperror.NotFound("asset"))
-			return
+			return httperror.NotFound("asset")
 		}
-		httperror.Render(w, r, httperror.Internal(err))
-		return
-	}
-	if _, err := h.pool.Exec(r.Context(), `DELETE FROM branding_assets WHERE id = $1`, id); err != nil {
-		httperror.Render(w, r, httperror.Internal(err))
+		if err != nil {
+			return err
+		}
+		return audit.Write(r.Context(), tx, audit.Event{
+			OrgID: orgRef(), Action: "branding.asset.delete", EntityType: "branding_asset", EntityID: id,
+			Before: map[string]any{"role": role},
+		})
+	})
+	if err != nil {
+		httperror.Render(w, r, err)
 		return
 	}
 	if h.files != nil {

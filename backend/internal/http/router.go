@@ -67,7 +67,6 @@ import (
 	"github.com/AGlElectronics/den/backend/internal/auth"
 	"github.com/AGlElectronics/den/backend/internal/clientip"
 	"github.com/AGlElectronics/den/backend/internal/config"
-	"github.com/AGlElectronics/den/backend/internal/files"
 	"github.com/AGlElectronics/den/backend/internal/keycloak"
 )
 
@@ -78,7 +77,7 @@ type Deps struct {
 	Config       *config.Config
 	Pool         *pgxpool.Pool
 	Logger       zerolog.Logger
-	Files        *files.Client
+	Files        AssetStore
 	OIDCVerifier auth.TokenVerifier
 	// KeycloakSync pushes branding into the realm; nil disables it.
 	KeycloakSync *KeycloakSync

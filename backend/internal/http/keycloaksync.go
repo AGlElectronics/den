@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
-	"github.com/AGlElectronics/den/backend/internal/files"
 	"github.com/AGlElectronics/den/backend/internal/keycloak"
 )
 
@@ -64,7 +63,7 @@ type KeycloakSync struct {
 
 // NewKeycloakSync returns a syncer; with an unconfigured client it is a no-op
 // that reports enabled=false. publicURL is Den's browser-facing base URL.
-func NewKeycloakSync(pool *pgxpool.Pool, filesClient *files.Client, cfg keycloak.Config, publicURL string, log zerolog.Logger) *KeycloakSync {
+func NewKeycloakSync(pool *pgxpool.Pool, filesClient AssetStore, cfg keycloak.Config, publicURL string, log zerolog.Logger) *KeycloakSync {
 	s := &KeycloakSync{
 		brand:     newBrandingHandler(pool, filesClient),
 		settings:  &orgSettingsHandler{pool: pool},

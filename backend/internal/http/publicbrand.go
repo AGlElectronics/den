@@ -108,6 +108,10 @@ func (h *brandingHandler) publicRoutes(settings *orgSettingsHandler) func(chi.Ro
 			writeJSON(w, http.StatusOK, b)
 		})
 		r.Get("/brand/assets/{role}", func(w http.ResponseWriter, req *http.Request) {
+			if !assetRoles[chi.URLParam(req, "role")] {
+				httperror.Render(w, req, httperror.NotFound("asset"))
+				return
+			}
 			var id uuid.UUID
 			err := h.pool.QueryRow(req.Context(), `
 				SELECT id FROM branding_assets WHERE organization_id = $1 AND role = $2
