@@ -132,8 +132,11 @@ MAJOR is the MAJOR every module is built for
   older credential of the module at once. Runbook for a leaked pairing URL
   or credential:
   [Disaster recovery](https://aglelectronics.github.io/con-services/operations/disaster-recovery/).
-- Rate limits per client IP: 10 pairing redeems, 120 public brand requests
-  and 10 backup downloads a minute (`429` with `Retry-After`).
+- Rate limits: 10 pairing redeems, 120 public brand requests and 10 backup
+  downloads a minute per client address (an IPv6 client counts as its `/64`
+  network), and 600 requests a minute per signed-in person. Over the limit
+  Den answers `429 rate_limited` with `Retry-After`. JSON bodies over 1 MiB
+  get `413 request_too_large`.
 - Branding uploads accept only the roles `logo`, `favicon` and
   `login-background` and only PNG, JPEG, WebP, ICO and SVG files, recognised
   from their content. Assets are served with `X-Content-Type-Options:
@@ -153,9 +156,9 @@ MAJOR is the MAJOR every module is built for
 - The browser no longer sends the person's token to modules for to-dos;
   Den calls the modules itself.
 - The backend reads the client address from `X-Forwarded-For` only when
-  the connection comes from a trusted proxy (`TRUSTED_PROXY_CIDRS`), and
-  ignores `X-Real-IP` and `True-Client-IP`, so rate limits cannot be
-  bypassed with a fake header.
+  the connection comes from a trusted proxy (`TRUSTED_PROXY_CIDRS`, the
+  shared authbase rules), and ignores `X-Real-IP` and `True-Client-IP`, so
+  rate limits cannot be bypassed with a fake header.
 - On Kubernetes, every connection Den makes or accepts inside the cluster
   is encrypted and the other side's certificate is checked: PostgreSQL,
   S3, Keycloak, the operator, and modules calling Den.
@@ -167,6 +170,56 @@ MAJOR is the MAJOR every module is built for
   HIGH and CRITICAL issues that have a fix).
 - A production build never falls back to dev sign-in: a `/config.json`
   without `authMode` means OIDC.
-- The admin role follows Keycloak groups on every request; the sign-in
-  session stays in sync across browser tabs, and an expired session sends
-  you back to sign-in.
+- The admin role follows Keycloak groups on every request. The web app
+  keeps tokens in memory; signing out or switching person is announced to
+  the other tabs, and a reload signs in again silently from the Keycloak
+  session. An expired session sends you back to sign-in.
+
+### Changed
+
+- **BREAKING:** Den accepts only access tokens with the audience `den-api`
+  (`OIDC_AUDIENCE`). ID tokens are refused, including ones that used to
+  work as the bearer. The shipped realm's audience mapper on `den-spa`
+  adds `den-api` to access tokens; upgrade the web app together with the
+  backend, then reload. Scripts that sent `id_token` must send
+  `access_token`.
+- **BREAKING:** `APP_ENV` defaults to `production`. `AUTH_MODE=dev` starts
+  only with `APP_ENV=development`. Local Compose already sets
+  `APP_ENV=development`; any other dev install that left `APP_ENV` empty
+  must set it, or set `AUTH_MODE=oidc`.
+- **BREAKING:** Groups come only from `OIDC_GROUPS_CLAIM` (default
+  `groups`). The token's `roles` claim is no longer read. Matching is the
+  full group path (`OIDC_GROUP_MATCH=full`): `/staff/den-admin` no longer
+  counts as `den-admin`. Move people into the group named in
+  `DEN_ADMIN_GROUPS`, set `OIDC_GROUP_PREFIX` (for example `/staff`), or
+  set `OIDC_GROUP_MATCH=last`.
+- **BREAKING:** Module settings follow the
+  [module settings contract](https://aglelectronics.github.io/con-services/concepts/module-settings/).
+  The bundle and `GET /api/v1/integrations/module-settings` send
+  `{"data": {…}, "updated_at": "…"}` with `finance.seller`,
+  `stash.lost_found`, `wiki.revision_retention_days`, `tasks.retention`,
+  `tasks.reminders` and `rally.submission_site_host`. `PUT
+  /api/v1/module-settings` takes `{"data": {…}}`; the old unwrapped
+  document is `400`. The SMTP password is no longer in the bundle: modules
+  read `smtp.password_set` and fetch the value from `GET
+  /api/v1/integrations/module-settings/secrets`. A migration converts
+  settings saved by an earlier Den. `identity` stays on Den and is not
+  sent to modules.
+- **BREAKING:** The web app's Content-Security-Policy is `script-src
+  'self'` (no inline scripts). The theme script and the silent sign-in
+  page are files. Set `KEYCLOAK_ORIGIN` on the web app container to the
+  sign-in server's origin (Helm derives it from the issuer; Compose and
+  the Kustomize base set `https://auth.conservices.test`).
+  `/silent-callback.html` allows framing by Den itself so a reload can
+  sign in silently.
+- Backups stored on the same S3 service as the live data
+  (`BACKUP_SAME_STORAGE_AS_DATA=true`, or the same host in
+  `BACKUP_S3_ENDPOINT` and `FILES_S3_ENDPOINT`) still run. The operator
+  status then includes `same_storage_as_data: true` and a `warning`, which
+  the Backups page and the admin area show. Point the backup bucket at
+  another provider or account and set the flag to `false`.
+- The Helm chart (still `1.0.0`, unreleased) sets `OIDC_AUDIENCE` to
+  `den-api`, `OIDC_GROUPS_CLAIM` and `OIDC_GROUP_MATCH`,
+  `BACKUP_SAME_STORAGE_AS_DATA`, and `frontend.securityHeaders`
+  (`KEYCLOAK_ORIGIN` and the other CSP origins). The web app pod mounts an
+  emptyDir at `/etc/nginx/snippets` for the security-header files.
