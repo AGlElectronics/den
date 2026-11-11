@@ -68,6 +68,9 @@ MAJOR is the MAJOR every module is built for
 - `den-server healthcheck` and `den-operator healthcheck` probe the running
   process's `/livez`, for Docker Compose healthchecks.
 - `DEN_PREREGISTER_MODULES` entries accept `internal_url`.
+- The backend can run as several replicas: `/den-migrate` holds a Postgres
+  advisory lock, so migrate initContainers starting together wait for each
+  other, and backup download links live in the database.
 - Sign-in background picture, with a panel or centred layout and an optional
   caption.
 - User preferences (light, dark or system theme), shared with paired
