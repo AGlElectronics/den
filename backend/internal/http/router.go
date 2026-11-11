@@ -176,6 +176,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 	}
 	prefsH := &preferencesHandler{pool: deps.Pool, caller: caller, devMode: deps.Config.AuthMode == config.AuthModeDev}
 	auditH := &auditHandler{pool: deps.Pool}
+	modSettingsH := &moduleSettingsHandler{pool: deps.Pool, allowHTTP: deps.Config.IsDevelopment()}
 	kcSync := deps.KeycloakSync
 	if kcSync == nil {
 		kcSync = NewKeycloakSync(deps.Pool, keycloak.Config{}, deps.Config.IdentityStaffMode, deps.Logger)
@@ -207,7 +208,8 @@ func NewRouter(deps Deps, version string) http.Handler {
 					bearer.Use(moduleAuth)
 					bearer.Route("/branding", brandH.integrationRoutes)
 					bearer.Get("/settings", settingsH.integrationGet)
-					bearer.Get("/bundle", brandH.integrationBundle(settingsH))
+					bearer.Get("/module-settings", modSettingsH.integrationGet)
+					bearer.Get("/bundle", brandH.integrationBundle(settingsH, modSettingsH))
 					bearer.Get("/user-preferences", prefsH.integrationGet)
 					bearer.Put("/user-preferences", prefsH.integrationPut)
 				})
@@ -225,7 +227,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 				secure.Get("/me", meHandler)
 				secure.Get("/me/preferences", prefsH.getMine)
 				secure.Put("/me/preferences", prefsH.putMine)
-				secure.With(auth.RequireRole(defaultOrgID, "member", "admin", "owner")).Get("/dashboard", dashboardHandler(deps.Pool, caller))
+				secure.With(auth.RequireRole(defaultOrgID, "member", "admin", "owner")).Get("/dashboard", dashboardHandler(deps.Pool, caller, modSettingsH))
 				secure.With(auth.RequireRole(defaultOrgID, "member", "admin", "owner")).Get("/portal/todos", caller.portalTodos)
 
 				// Admin console APIs: convention admins / owners only.
@@ -242,6 +244,8 @@ func NewRouter(deps Deps, version string) http.Handler {
 					admin.Get("/keycloak-sync", kcSync.getStatus)
 					admin.Post("/keycloak-sync", kcSync.syncNow)
 					admin.Get("/audit-events", auditH.list)
+					admin.Get("/module-settings", modSettingsH.get)
+					admin.Put("/module-settings", modSettingsH.put)
 				})
 
 				// Backups, downloads, the schedule and database drops:

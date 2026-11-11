@@ -150,7 +150,9 @@ func (h *brandingHandler) publicRoutes(settings *orgSettingsHandler) func(chi.Ro
 
 // integrationBundle is GET /api/v1/integrations/bundle: brand + org settings
 // in one call, so a module syncs everything it needs at once.
-func (h *brandingHandler) integrationBundle(settings *orgSettingsHandler) http.HandlerFunc {
+// module_settings holds the Den → Module settings meant for the calling
+// module (see modulesettings.go).
+func (h *brandingHandler) integrationBundle(settings *orgSettingsHandler, modSettings *moduleSettingsHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		m, ok := auth.EnsureModule(w, r)
 		if !ok {
@@ -166,7 +168,12 @@ func (h *brandingHandler) integrationBundle(settings *orgSettingsHandler) http.H
 			httperror.Render(w, r, err)
 			return
 		}
+		ms, err := modSettings.forModule(r.Context(), m.Slug)
+		if err != nil {
+			httperror.Render(w, r, httperror.Internal(err))
+			return
+		}
 		b.LogoURL, b.FaviconURL, b.LoginBackgroundURL = "", "", ""
-		writeJSON(w, http.StatusOK, map[string]any{"brand": b, "settings": s})
+		writeJSON(w, http.StatusOK, map[string]any{"brand": b, "settings": s, "module_settings": ms})
 	}
 }

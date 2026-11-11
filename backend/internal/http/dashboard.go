@@ -12,7 +12,7 @@ import (
 // dashboardHandler returns the home-portal payload: org/convention identity,
 // the usable (enabled + paired) modules the person may use (admins see all),
 // and, for admins only, organisation-wide counts.
-func dashboardHandler(pool *pgxpool.Pool, caller *moduleCaller) http.HandlerFunc {
+func dashboardHandler(pool *pgxpool.Pool, caller *moduleCaller, modSettings *moduleSettingsHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		u, _ := auth.FromContext(ctx)
@@ -57,6 +57,8 @@ func dashboardHandler(pool *pgxpool.Pool, caller *moduleCaller) http.HandlerFunc
 		if err := pool.QueryRow(ctx, `SELECT slug, display_name FROM organizations WHERE id = $1`, orgID).Scan(&slug, &name); err == nil {
 			out["organization"] = orgDTO{ID: orgID.String(), Slug: slug, DisplayName: name}
 		}
+
+		out["identity_links"] = modSettings.identityLinks(ctx, isAdmin)
 
 		if isAdmin {
 			var modules, paired, unpaired, users int64
