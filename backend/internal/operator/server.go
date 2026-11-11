@@ -14,6 +14,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
+
+	"github.com/AGlElectronics/den/backend/internal/authbase"
 )
 
 // StaleAfter is how old the last good backup may get before Den warns.
@@ -85,8 +87,16 @@ type statusDTO struct {
 	NextRun          *time.Time `json:"next_run,omitempty"`
 	Running          string     `json:"running,omitempty"`
 	Problem          string     `json:"problem,omitempty"`
-	Databases        []Database `json:"databases"`
+	// SameStorageAsData and Warning flag backups kept on the live data's S3
+	// service: allowed, but not a real copy.
+	SameStorageAsData bool       `json:"same_storage_as_data"`
+	Warning           string     `json:"warning,omitempty"`
+	Databases         []Database `json:"databases"`
 }
+
+// SameStorageWarning is the status warning for BACKUP_SAME_STORAGE_AS_DATA.
+const SameStorageWarning = "Backups are stored on the same S3 service as the live data. " +
+	"If that service is lost, the data and its backups are lost together; move backups to another provider or location."
 
 func (o *Operator) handleStatus(w http.ResponseWriter, r *http.Request) {
 	dbs, err := o.pg.list(r.Context())
@@ -108,6 +118,9 @@ func (o *Operator) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if o.store != nil {
 		out.Target = o.cfg.Backup.Endpoint + "/" + o.cfg.BackupBucket
 		out.Recipients = o.cfg.RecipientText
+		if o.cfg.SameStorageAsData {
+			out.SameStorageAsData, out.Warning = true, SameStorageWarning
+		}
 		set, err := o.store.settings(r.Context())
 		if err != nil {
 			writeErr(w, http.StatusBadGateway, "can't read backup storage: "+err.Error())
@@ -138,7 +151,7 @@ func (o *Operator) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in Settings
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || !in.valid() {
+	if err := authbase.DecodeJSON(w, r, &in, authbase.DecodeOptions{MaxBytes: 64 << 10}); err != nil || !in.valid() {
 		writeErr(w, http.StatusBadRequest, "hour must be 0–23, keep at least 1 daily backup")
 		return
 	}
@@ -202,7 +215,7 @@ func (o *Operator) handleCreateDB(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Name string `json:"name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	if err := authbase.DecodeJSON(w, r, &in, authbase.DecodeOptions{MaxBytes: 64 << 10}); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}

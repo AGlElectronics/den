@@ -19,6 +19,10 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// RestoreGuide is the restore runbook, named in every archive's manifest.
+const RestoreGuide = "See https://aglelectronics.github.io/con-services/operations/databases-and-backups/#restore " +
+	"and, for whole-installation recovery, https://aglelectronics.github.io/con-services/operations/disaster-recovery/."
+
 // Manifest is written into every archive as manifest.json.
 type Manifest struct {
 	Kind      string           `json:"kind"`
@@ -118,7 +122,7 @@ func (o *Operator) backup(ctx context.Context, kind string, only string) (run Ru
 	man := Manifest{
 		Kind:      kind,
 		CreatedAt: run.StartedAt,
-		Restore:   "See docs/operations.md, section Restore.",
+		Restore:   RestoreGuide,
 	}
 	if err := o.dump(ctx, "pg_dumpall", filepath.Join(dir, "globals.sql"),
 		"--globals-only", "--dbname="+o.cfg.PGAdminURL); err != nil {

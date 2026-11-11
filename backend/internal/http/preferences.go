@@ -132,7 +132,7 @@ func (h *preferencesHandler) putMine(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Theme string `json:"theme"`
 	}
-	if err := decodeJSON(r, &in); err != nil {
+	if err := decodeJSON(w, r, &in); err != nil {
 		httperror.Render(w, r, err)
 		return
 	}
@@ -180,7 +180,7 @@ func (h *preferencesHandler) integrationPut(w http.ResponseWriter, r *http.Reque
 		Subject string `json:"subject"`
 		Theme   string `json:"theme"`
 	}
-	if err := decodeJSON(r, &in); err != nil {
+	if err := decodeJSON(w, r, &in); err != nil {
 		httperror.Render(w, r, err)
 		return
 	}

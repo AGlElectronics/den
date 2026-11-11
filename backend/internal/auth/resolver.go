@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/AGlElectronics/den/backend/internal/groupmatch"
 )
 
 // defaultOrgID matches the seed row in migrations/20260101000001_init.sql.
@@ -28,11 +30,13 @@ type Resolver struct {
 
 // GroupConfig names the IdP groups behind Den's roles. Members of Admin are
 // org admins, members of Member are org members (everyone signed in when
-// Member is empty), members of Ops also get RoleOps.
+// Member is empty), members of Ops also get RoleOps. Rule is the shared
+// group matching rule (OIDC_GROUP_MATCH, OIDC_GROUP_PREFIX).
 type GroupConfig struct {
 	Admin  []string
 	Member []string
 	Ops    []string
+	Rule   groupmatch.Config
 }
 
 // NewResolver builds a resolver for the given group configuration.
@@ -178,9 +182,9 @@ func (r *Resolver) LoadOrProvisionOIDCUser(ctx context.Context, claims *OIDCClai
 
 	role := ""
 	switch {
-	case InAnyGroup(groups, r.groups.Admin):
+	case InAnyGroup(r.groups.Rule, groups, r.groups.Admin):
 		role = "admin"
-	case len(r.groups.Member) == 0 || InAnyGroup(groups, r.groups.Member):
+	case len(r.groups.Member) == 0 || InAnyGroup(r.groups.Rule, groups, r.groups.Member):
 		role = "member"
 	}
 	if role == "" {
@@ -206,7 +210,7 @@ func (r *Resolver) LoadOrProvisionOIDCUser(ctx context.Context, claims *OIDCClai
 	}
 
 	var requestRoles []string
-	if InAnyGroup(groups, r.groups.Ops) {
+	if InAnyGroup(r.groups.Rule, groups, r.groups.Ops) {
 		requestRoles = append(requestRoles, RoleOps)
 	}
 
@@ -300,21 +304,12 @@ func (r *Resolver) provisionOIDCUser(
 	return userID, nil
 }
 
-// InAnyGroup reports whether any token group matches one of want.
-// Comparison is case-insensitive and ignores a leading "/" (Keycloak's
-// full-path form).
-func InAnyGroup(groups, want []string) bool {
-	norm := func(s string) string { return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(s), "/")) }
-	set := map[string]struct{}{}
-	for _, w := range want {
-		set[norm(w)] = struct{}{}
-	}
-	for _, g := range groups {
-		if _, ok := set[norm(g)]; ok {
-			return true
-		}
-	}
-	return false
+// InAnyGroup reports whether any token group matches one of want under the
+// shared rule (docs: concepts/authentication, "How groups are matched"):
+// trimmed, one leading "/" dropped, case-insensitive, OIDC_GROUP_PREFIX
+// removed, and the whole path compared unless OIDC_GROUP_MATCH=last.
+func InAnyGroup(rule groupmatch.Config, groups, want []string) bool {
+	return rule.MatchAny(groups, want)
 }
 
 func (r *Resolver) loadMemberships(ctx context.Context, userID uuid.UUID) ([]Membership, error) {

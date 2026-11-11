@@ -3,7 +3,8 @@
 // databases on Den's behalf and takes encrypted backups of the whole suite
 // (every database on the shared server plus module file storage) to
 // S3-compatible object storage. Only Den calls it, with a shared token, over
-// the internal network. See docs/operations.md at the repository root.
+// the internal network. Docs:
+// https://aglelectronics.github.io/con-services/operations/databases-and-backups/
 package operator
 
 import (
@@ -52,6 +53,10 @@ type Config struct {
 	Recipients     []age.Recipient
 	RecipientText  []string
 	Location       *time.Location
+	// SameStorageAsData says the backup bucket is on the same S3 service as
+	// the live data (BACKUP_SAME_STORAGE_AS_DATA). Den then warns: losing
+	// that service loses the data and its backups together.
+	SameStorageAsData bool
 
 	// Files is the live module file storage; FileBuckets are copied into
 	// every backup.
@@ -76,7 +81,8 @@ func LoadConfig() (*Config, error) {
 			Region:       env("BACKUP_S3_REGION", "us-east-1"),
 			UsePathStyle: envBool("BACKUP_S3_USE_PATH_STYLE", true),
 		},
-		BackupBucket: env("BACKUP_S3_BUCKET", ""),
+		BackupBucket:      env("BACKUP_S3_BUCKET", ""),
+		SameStorageAsData: envBool("BACKUP_SAME_STORAGE_AS_DATA", false),
 		Files: S3Target{
 			Endpoint:     env("FILES_S3_ENDPOINT", ""),
 			AccessKey:    env("FILES_S3_ACCESS_KEY_ID", ""),
@@ -138,11 +144,27 @@ func LoadConfig() (*Config, error) {
 		if len(c.FileBuckets) > 0 && c.Files.Endpoint == "" {
 			errs = append(errs, "FILES_S3_ENDPOINT is required when FILES_S3_BUCKETS is set")
 		}
+		if c.Files.Endpoint != "" && sameEndpoint(c.Files.Endpoint, c.Backup.Endpoint) {
+			c.SameStorageAsData = true
+		}
 	}
 	if len(errs) > 0 {
 		return nil, errors.New("invalid operator config: " + strings.Join(errs, "; "))
 	}
 	return c, nil
+}
+
+// sameEndpoint compares two S3 endpoints by host and port, ignoring the
+// scheme, case and a trailing slash.
+func sameEndpoint(a, b string) bool {
+	host := func(s string) string {
+		s = strings.ToLower(strings.TrimRight(strings.TrimSpace(s), "/"))
+		if u, err := url.Parse(s); err == nil && u.Host != "" {
+			return u.Host
+		}
+		return s
+	}
+	return a != "" && b != "" && host(a) == host(b)
 }
 
 func env(key, fallback string) string {

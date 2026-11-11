@@ -38,7 +38,9 @@ func MigrateUp(ctx context.Context, dsn string) error {
 	if _, err := lock.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrationLockID); err != nil {
 		return fmt.Errorf("take the migration lock: %w", err)
 	}
-	defer func() { _, _ = lock.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrationLockID) }()
+	defer func() {
+		_, _ = lock.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrationLockID)
+	}()
 
 	goose.SetBaseFS(migrations.FS)
 	goose.SetTableName("goose_db_version")

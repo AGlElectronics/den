@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog/log"
 
+	"github.com/AGlElectronics/den/backend/internal/authbase"
 	"github.com/AGlElectronics/den/backend/internal/config"
 	"github.com/AGlElectronics/den/backend/internal/httperror"
 )
@@ -20,19 +21,20 @@ type TokenVerifier interface {
 	Verify(ctx context.Context, bearer string) (*OIDCClaims, error)
 }
 
-// Middleware authenticates a human request. In dev mode, X-Dev-User (or the
-// default from DEV_DEFAULT_USER) is accepted and the user is provisioned on
-// the fly. In OIDC mode, the Authorization Bearer ID token is verified
-// against the configured issuer and the user is JIT-provisioned. Disabled
-// accounts (users.is_disabled) get 403.
+// Middleware authenticates a human request. In dev mode (AUTH_MODE=dev with
+// APP_ENV=development), X-Dev-User (or the default from DEV_DEFAULT_USER) is
+// accepted and the user is provisioned on the fly. In OIDC mode, the
+// Authorization Bearer access token is verified against the configured
+// issuer and audience and the user is JIT-provisioned. Disabled accounts
+// (users.is_disabled) get 403.
 func Middleware(cfg *config.Config, resolver *Resolver, oidcVerifier TokenVerifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
 
-			switch cfg.AuthMode {
-			case config.AuthModeDev:
-				name := strings.TrimSpace(r.Header.Get("X-Dev-User"))
+			switch {
+			case cfg.DevAuth():
+				name := strings.TrimSpace(r.Header.Get(authbase.HeaderDevUser))
 				if name == "" {
 					name = cfg.DevDefaultUser
 				}
@@ -48,7 +50,7 @@ func Middleware(cfg *config.Config, resolver *Resolver, oidcVerifier TokenVerifi
 				}
 				ctx = WithUser(ctx, user)
 
-			case config.AuthModeOIDC:
+			case cfg.AuthMode == config.AuthModeOIDC || cfg.AuthMode == "":
 				if oidcVerifier == nil {
 					httperror.Render(w, r, httperror.Internal(errors.New("oidc verifier not initialised")))
 					return
@@ -77,7 +79,7 @@ func Middleware(cfg *config.Config, resolver *Resolver, oidcVerifier TokenVerifi
 				ctx = WithUser(ctx, user)
 
 			default:
-				httperror.Render(w, r, httperror.Internal(errors.New("unknown auth mode")))
+				httperror.Render(w, r, httperror.Internal(errors.New("AUTH_MODE=dev without APP_ENV=development")))
 				return
 			}
 

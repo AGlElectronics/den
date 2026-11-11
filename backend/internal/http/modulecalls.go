@@ -18,6 +18,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/AGlElectronics/den/backend/internal/auth"
+	"github.com/AGlElectronics/den/backend/internal/groupmatch"
 )
 
 // moduleCaller is how Den calls paired modules server to server: their
@@ -37,6 +38,9 @@ type moduleCaller struct {
 	allowHTTP bool
 	key       []byte
 	log       zerolog.Logger
+	// groups is the shared group rule for matching a person's groups
+	// against a module's role catalog.
+	groups groupmatch.Config
 
 	mu       sync.Mutex
 	catalogs map[uuid.UUID]cachedCatalog
@@ -154,7 +158,7 @@ func (c *moduleCaller) canUse(ctx context.Context, groups []string, m portalModu
 		return true
 	}
 	catalog, ok := c.catalogGroups(ctx, m)
-	return ok && auth.InAnyGroup(groups, catalog)
+	return ok && auth.InAnyGroup(c.groups, groups, catalog)
 }
 
 // usableModules lists enabled, paired modules with an address.

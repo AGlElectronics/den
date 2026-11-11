@@ -87,6 +87,7 @@ func TestLoadFailsOnInvalidPreregisterModules(t *testing.T) {
 	t.Setenv("S3_ACCESS_KEY_ID", "k")
 	t.Setenv("S3_SECRET_ACCESS_KEY", "s")
 	t.Setenv("AUTH_MODE", "dev")
+	t.Setenv("APP_ENV", "development")
 
 	t.Setenv("DEN_PREREGISTER_MODULES", `[{"slug":"rally"}]`)
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "DEN_PREREGISTER_MODULES") {
@@ -103,6 +104,8 @@ func TestLoadFailsOnInvalidPreregisterModules(t *testing.T) {
 	}
 
 	t.Setenv("APP_ENV", "production")
+	t.Setenv("AUTH_MODE", "oidc")
+	t.Setenv("OIDC_ISSUER_URL", "https://auth.example.org/realms/conservices")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "must use https") {
 		t.Fatalf("outside development an http base_url must be refused, got %v", err)
 	}

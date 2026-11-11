@@ -230,7 +230,7 @@ type putProfileInput struct {
 
 func (h *brandingHandler) humanPutProfile(w http.ResponseWriter, r *http.Request) {
 	var in putProfileInput
-	if err := decodeJSON(r, &in); err != nil {
+	if err := decodeJSON(w, r, &in); err != nil {
 		httperror.Render(w, r, err)
 		return
 	}

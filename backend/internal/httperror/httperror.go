@@ -8,21 +8,27 @@ import (
 	"net/http"
 
 	"github.com/rs/zerolog/log"
+
+	"github.com/AGlElectronics/den/backend/internal/authbase"
 )
 
 // Code is a stable string returned to API clients so they can switch on it.
 type Code string
 
 const (
-	CodeBadRequest   Code = "bad_request"
-	CodeValidation   Code = "validation_failed"
-	CodeUnauthorized Code = "unauthorized"
-	CodeForbidden    Code = "forbidden"
-	CodeNotFound     Code = "not_found"
-	CodeConflict     Code = "conflict"
-	CodeInternal     Code = "internal"
-	CodeUnavailable  Code = "unavailable"
-	CodeRateLimited  Code = "rate_limited"
+	// Codes that authbase also writes stay equal to its constants, so a
+	// decoder error and a handler error cannot spell the same failure two ways.
+	CodeBadRequest           Code = authbase.CodeBadRequest
+	CodeValidation           Code = "validation_failed"
+	CodeUnauthorized         Code = "unauthorized"
+	CodeForbidden            Code = "forbidden"
+	CodeNotFound             Code = "not_found"
+	CodeConflict             Code = "conflict"
+	CodeInternal             Code = "internal"
+	CodeUnavailable          Code = "unavailable"
+	CodeRateLimited          Code = authbase.CodeRateLimited
+	CodeTooLarge             Code = authbase.CodeRequestTooLarge
+	CodeUnsupportedMediaType Code = authbase.CodeUnsupportedMediaType
 )
 
 // Error is the canonical service error type.
@@ -130,6 +136,10 @@ func statusFor(code Code) int {
 		return http.StatusBadGateway
 	case CodeRateLimited:
 		return http.StatusTooManyRequests
+	case CodeTooLarge:
+		return http.StatusRequestEntityTooLarge
+	case CodeUnsupportedMediaType:
+		return http.StatusUnsupportedMediaType
 	default:
 		return http.StatusInternalServerError
 	}

@@ -86,7 +86,7 @@ func (h *orgSettingsHandler) get(w http.ResponseWriter, r *http.Request) {
 
 func (h *orgSettingsHandler) put(w http.ResponseWriter, r *http.Request) {
 	var in map[string]any
-	if err := decodeJSON(r, &in); err != nil {
+	if err := decodeJSON(w, r, &in); err != nil {
 		httperror.Render(w, r, err)
 		return
 	}

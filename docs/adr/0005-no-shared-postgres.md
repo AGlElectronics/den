@@ -51,4 +51,4 @@ Den's operator (`cmd/operator`) is the only component with the server's admin
 login. It creates and drops module databases on Den's request and backs up
 the whole server. `MANAGED_DATABASES=false` turns database management off for
 deployments where each module has its own server. Details, backups and
-restore: [docs/operations.md](../../../docs/operations.md).
+restore: [Databases, backups and restore](https://aglelectronics.github.io/con-services/operations/databases-and-backups/).

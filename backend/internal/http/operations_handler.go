@@ -68,7 +68,7 @@ func (h *operationsHandler) settings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in map[string]int
-	if err := decodeJSON(r, &in); err != nil {
+	if err := decodeJSON(w, r, &in); err != nil {
 		httperror.Render(w, r, err)
 		return
 	}
@@ -128,7 +128,7 @@ func (h *operationsHandler) downloadLink(w http.ResponseWriter, r *http.Request)
 	var in struct {
 		Key string `json:"key"`
 	}
-	if err := decodeJSON(r, &in); err != nil {
+	if err := decodeJSON(w, r, &in); err != nil {
 		httperror.Render(w, r, err)
 		return
 	}

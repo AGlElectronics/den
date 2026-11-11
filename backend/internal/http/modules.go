@@ -171,7 +171,7 @@ func (h *moduleHandler) validateAddresses(fields map[string]string, baseURL, int
 
 func (h *moduleHandler) create(w http.ResponseWriter, r *http.Request) {
 	var in createModuleInput
-	if err := decodeJSON(r, &in); err != nil {
+	if err := decodeJSON(w, r, &in); err != nil {
 		httperror.Render(w, r, err)
 		return
 	}
@@ -304,7 +304,7 @@ func (h *moduleHandler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in updateModuleInput
-	if err := decodeJSON(r, &in); err != nil {
+	if err := decodeJSON(w, r, &in); err != nil {
 		httperror.Render(w, r, err)
 		return
 	}

@@ -3,12 +3,12 @@ package http
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/AGlElectronics/den/backend/internal/authbase"
 	"github.com/AGlElectronics/den/backend/internal/httperror"
 )
 
@@ -21,16 +21,15 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-func decodeJSON(r *http.Request, dst any) error {
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil {
-		if errors.Is(err, io.EOF) {
-			return httperror.BadRequest("request body is empty")
-		}
-		return httperror.BadRequest("invalid JSON: " + err.Error())
+// decodeJSON reads one JSON object into dst with the shared decoder: at most
+// 1 MiB (413 request_too_large), unknown fields refused (400 bad_request).
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	err := authbase.DecodeJSON(w, r, dst, authbase.DecodeOptions{DisallowUnknownFields: true})
+	var de *authbase.DecodeError
+	if errors.As(err, &de) {
+		return httperror.New(httperror.Code(de.Code), de.Message).WithCause(err)
 	}
-	return nil
+	return err
 }
 
 // orgRef is defaultOrgID as the audit_events.organization_id value.

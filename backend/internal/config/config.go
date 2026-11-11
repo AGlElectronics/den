@@ -6,7 +6,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -14,15 +13,21 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"github.com/AGlElectronics/den/backend/internal/clientip"
+	"github.com/AGlElectronics/den/backend/internal/authbase"
+	"github.com/AGlElectronics/den/backend/internal/groupmatch"
 )
 
-type AuthMode string
+// AuthMode is AUTH_MODE, read and validated by the shared authbase package.
+type AuthMode = authbase.AuthMode
 
 const (
-	AuthModeOIDC AuthMode = "oidc"
-	AuthModeDev  AuthMode = "dev"
+	AuthModeOIDC = authbase.AuthOIDC
+	AuthModeDev  = authbase.AuthDev
 )
+
+// DefaultOIDCAudience is the audience Den's access tokens carry (the
+// audience mapper on den-spa); OIDC_AUDIENCE overrides it.
+const DefaultOIDCAudience = "den-api"
 
 // Staff identity modes (IDENTITY_STAFF_MODE).
 const (
@@ -33,6 +38,8 @@ const (
 
 // Config holds every setting the backend reads.
 type Config struct {
+	// AppEnv is APP_ENV, normalised (authbase.NormalizeAppEnv): trimmed,
+	// lower-cased, production when unset. Only development relaxes rules.
 	AppEnv      string
 	AppBaseURL  string
 	HTTPAddr    string
@@ -48,10 +55,17 @@ type Config struct {
 	S3Region          string
 	S3UsePathStyle    bool
 
-	AuthMode       AuthMode
-	OIDCIssuerURL  string
-	OIDCClientID   string
-	OIDCAudience   string
+	// AuthMode is AUTH_MODE: oidc (default) or dev, which needs
+	// APP_ENV=development.
+	AuthMode      AuthMode
+	OIDCIssuerURL string
+	// OIDCAudience must be in the access token's aud (OIDC_AUDIENCE,
+	// default den-api). OIDC_CLIENT_ID is only for the web app's
+	// /config.json; the backend does not read it.
+	OIDCAudience string
+	// GroupMatch is the shared group rule (OIDC_GROUPS_CLAIM,
+	// OIDC_GROUP_MATCH, OIDC_GROUP_PREFIX).
+	GroupMatch     groupmatch.Config
 	DevDefaultUser string
 	// AdminGroups are the IdP groups whose members are org admins.
 	AdminGroups []string
@@ -63,9 +77,10 @@ type Config struct {
 	OpsGroups []string
 
 	CORSAllowedOrigins []string
-	// TrustedProxyCIDRs lists the proxies whose X-Forwarded-For entries are
-	// believed when working out the client IP (TRUSTED_PROXY_CIDRS).
-	TrustedProxyCIDRs []netip.Prefix
+	// TrustedProxies lists the proxies whose X-Forwarded-For entries are
+	// believed when working out the client IP (TRUSTED_PROXY_CIDRS, parsed
+	// by authbase.FromEnv). The zero value trusts no proxy.
+	TrustedProxies authbase.TrustedProxies
 
 	// IdentityStaffMode is where staff accounts live (IDENTITY_STAFF_MODE):
 	// own (our realm, default), brokered (our realm, linked to the
@@ -103,7 +118,7 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		AppEnv:             getEnv("APP_ENV", "development"),
+		AppEnv:             authbase.NormalizeAppEnv(os.Getenv(authbase.EnvAppEnv)),
 		AppBaseURL:         getEnv("APP_BASE_URL", "http://localhost:8090"),
 		HTTPAddr:           getEnv("HTTP_ADDR", ":8090"),
 		DatabaseURL:        getEnv("DATABASE_URL", ""),
@@ -113,10 +128,8 @@ func Load() (*Config, error) {
 		S3SecretAccessKey:  getEnv("S3_SECRET_ACCESS_KEY", ""),
 		S3Region:           getEnv("S3_REGION", "us-east-1"),
 		S3UsePathStyle:     getEnvBool("S3_USE_PATH_STYLE", true),
-		AuthMode:           AuthMode(getEnv("AUTH_MODE", "dev")),
 		OIDCIssuerURL:      getEnv("OIDC_ISSUER_URL", ""),
-		OIDCClientID:       getEnv("OIDC_CLIENT_ID", ""),
-		OIDCAudience:       getEnv("OIDC_AUDIENCE", ""),
+		OIDCAudience:       getEnv("OIDC_AUDIENCE", DefaultOIDCAudience),
 		DevDefaultUser:     getEnv("DEV_DEFAULT_USER", "dev-admin"),
 		AdminGroups:        splitCSV(getEnv("DEN_ADMIN_GROUPS", "den-admin")),
 		MemberGroups:       splitCSV(getEnv("DEN_MEMBER_GROUPS", "den-member")),
@@ -135,11 +148,17 @@ func Load() (*Config, error) {
 	}
 	cfg.KeycloakRealm = getEnv("KEYCLOAK_REALM", realmFromIssuer(cfg.OIDCIssuerURL))
 
-	trusted, err := clientip.ParseCIDRs(getEnv("TRUSTED_PROXY_CIDRS", clientip.DefaultTrustedProxies))
+	authCfg, err := authbase.FromEnv(os.Getenv)
 	if err != nil {
-		return nil, fmt.Errorf("invalid config: TRUSTED_PROXY_CIDRS: %w", err)
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
-	cfg.TrustedProxyCIDRs = trusted
+	cfg.AuthMode = authCfg.AuthMode
+	cfg.TrustedProxies = authCfg.TrustedProxies
+
+	cfg.GroupMatch, err = groupmatch.FromEnv(os.Getenv)
+	if err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
 
 	prereg, err := ParsePreregisterModules(getEnv("DEN_PREREGISTER_MODULES", ""), cfg.IsDevelopment())
 	if err != nil {
@@ -153,9 +172,17 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// Auth is the authbase view of AUTH_MODE, APP_ENV and TRUSTED_PROXY_CIDRS.
+func (c *Config) Auth() authbase.Config {
+	return authbase.Config{AppEnv: c.AppEnv, AuthMode: c.AuthMode, TrustedProxies: c.TrustedProxies}
+}
+
 // IsDevelopment reports APP_ENV=development, which allows http module
 // addresses.
-func (c *Config) IsDevelopment() bool { return c.AppEnv == "development" }
+func (c *Config) IsDevelopment() bool { return c.Auth().Development() }
+
+// DevAuth reports AUTH_MODE=dev together with APP_ENV=development.
+func (c *Config) DevAuth() bool { return c.Auth().DevAuth() }
 
 func (c *Config) validate() error {
 	var errs []string
@@ -187,18 +214,18 @@ func (c *Config) validate() error {
 	if c.OperatorURL != "" && c.OperatorToken == "" {
 		errs = append(errs, "OPERATOR_TOKEN is required when OPERATOR_URL is set")
 	}
-	switch c.AuthMode {
-	case AuthModeOIDC:
+	if err := c.Auth().Validate(); err != nil {
+		errs = append(errs, err.Error())
+	} else if !c.DevAuth() {
 		if c.OIDCIssuerURL == "" {
 			errs = append(errs, "OIDC_ISSUER_URL is required when AUTH_MODE=oidc")
 		}
-		if c.OIDCClientID == "" {
-			errs = append(errs, "OIDC_CLIENT_ID is required when AUTH_MODE=oidc")
+		if strings.TrimSpace(c.OIDCAudience) == "" {
+			errs = append(errs, "OIDC_AUDIENCE must not be empty when AUTH_MODE=oidc")
 		}
-	case AuthModeDev:
-		// no extra required fields
-	default:
-		errs = append(errs, fmt.Sprintf("AUTH_MODE must be 'oidc' or 'dev', got %q", c.AuthMode))
+	}
+	if err := c.GroupMatch.Validate(); err != nil {
+		errs = append(errs, err.Error())
 	}
 	if len(errs) > 0 {
 		return errors.New("invalid config: " + strings.Join(errs, "; "))

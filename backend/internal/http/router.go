@@ -8,7 +8,7 @@
 //	GET  /api/health                                   — human-friendly health, like Stash's
 //	GET  /api/role-catalog                             — Den's roles and their IdP groups
 //
-//	Signed in (human UI, dev-header or OIDC):
+//	Signed in (human UI, dev-header or OIDC access token; rate-limited per person):
 //	GET    /api/v1/me
 //	GET    /api/v1/me/preferences
 //	PUT    /api/v1/me/preferences                — theme: system | light | dark
@@ -25,6 +25,7 @@
 //	GET    /api/v1/modules/{id}/credentials
 //	DELETE /api/v1/modules/{id}/credentials      — revoke every active credential
 //	DELETE /api/v1/modules/{id}/credentials/{credentialID}
+//	GET    /api/v1/modules/{id}/settings         — the module settings that module receives
 //	GET    /api/v1/brand/profile
 //	PUT    /api/v1/brand/profile
 //	GET    /api/v1/brand/assets
@@ -58,6 +59,7 @@
 //	GET /api/v1/integrations/branding/assets/{id}
 //	GET /api/v1/integrations/settings
 //	GET /api/v1/integrations/module-settings
+//	GET /api/v1/integrations/module-settings/secrets  — the SMTP password
 //	GET /api/v1/integrations/bundle                   — brand + settings in one call
 //	GET/PUT /api/v1/integrations/user-preferences     — theme of one of the module's users
 package http
@@ -69,13 +71,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
 
 	"github.com/AGlElectronics/den/backend/internal/auth"
-	"github.com/AGlElectronics/den/backend/internal/clientip"
+	"github.com/AGlElectronics/den/backend/internal/authbase"
 	"github.com/AGlElectronics/den/backend/internal/config"
 	"github.com/AGlElectronics/den/backend/internal/httperror"
 	"github.com/AGlElectronics/den/backend/internal/keycloak"
@@ -93,15 +94,16 @@ type Deps struct {
 	OIDCVerifier auth.TokenVerifier
 	// KeycloakSync pushes branding into the realm; nil disables it.
 	KeycloakSync *KeycloakSync
-	// NewLimiter builds the limiter of one rate-limited route; nil uses an
-	// in-process ratelimit.Memory.
+	// NewLimiter builds the limiter of one rate-limited route; nil uses
+	// ratelimit.New (the shared authbase token bucket, kept in this process).
 	NewLimiter func(route string, limit int, window time.Duration) ratelimit.Limiter
 	// ModuleHTTPClient is used for calls to modules (role catalogs, to-dos);
 	// nil uses a client with a 5 second timeout.
 	ModuleHTTPClient *http.Client
 }
 
-// Rate limits per client IP on the routes that need no sign-in.
+// Rate limits: per client IP (IPv6 per /64) on the routes that need no
+// sign-in, per person on the signed-in API.
 var rateLimits = map[string]struct {
 	limit  int
 	window time.Duration
@@ -109,30 +111,44 @@ var rateLimits = map[string]struct {
 	"pairing-redeem":  {10, time.Minute},
 	"public-brand":    {120, time.Minute},
 	"backup-download": {10, time.Minute},
+	"signed-in":       {600, time.Minute},
 }
 
-// limitRoute is the rate-limit hook of one route.
-func limitRoute(deps Deps, route string) func(http.Handler) http.Handler {
+// limitRoute is the rate-limit hook of one route; keyOf picks the bucket.
+func limitRoute(deps Deps, route string, keyOf func(*http.Request) string) func(http.Handler) http.Handler {
 	rl := rateLimits[route]
 	var l ratelimit.Limiter
 	if deps.NewLimiter != nil {
 		l = deps.NewLimiter(route, rl.limit, rl.window)
 	} else {
-		l = ratelimit.NewMemory(rl.limit, rl.window)
+		l = ratelimit.New(rl.limit, rl.window)
 	}
-	return ratelimit.Middleware(l,
-		func(r *http.Request) string { return clientip.FromRequest(r) },
+	return ratelimit.Middleware(l, keyOf,
 		func(w http.ResponseWriter, r *http.Request) { httperror.Render(w, r, httperror.RateLimited()) })
 }
+
+// bySubject keys the signed-in API by the person (issuer and subject).
+var bySubject = ratelimit.BySubject(func(r *http.Request) (authbase.UserKey, bool) {
+	u, ok := auth.FromContext(r.Context())
+	if !ok {
+		return authbase.UserKey{}, false
+	}
+	return authbase.UserKey{Issuer: u.Issuer, Subject: u.Subject}, true
+})
 
 // NewRouter wires the chi router with middleware, CORS and routes.
 // `version` is baked in via -ldflags at build time and surfaced on
 // /livez and /api/health.
 func NewRouter(deps Deps, version string) http.Handler {
 	r := chi.NewRouter()
+	authCfg := deps.Config.Auth()
 
+	r.Use(authbase.SecurityHeaders)
 	r.Use(chimiddleware.RequestID)
-	r.Use(clientip.Middleware(deps.Config.TrustedProxyCIDRs))
+	// Replaces RemoteAddr with the client behind TRUSTED_PROXY_CIDRS, so
+	// rate limits and logs see the person rather than the last proxy.
+	r.Use(authCfg.TrustedProxies.Middleware)
+	r.Use(authCfg.StripDevHeaders)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(timeoutExceptLongRunning(60 * time.Second))
 
@@ -148,13 +164,11 @@ func NewRouter(deps Deps, version string) http.Handler {
 	}))
 	r.Use(hlog.RequestIDHandler("request_id", "X-Request-ID"))
 
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   deps.Config.CORSAllowedOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Dev-User", "X-Request-ID"},
-		ExposedHeaders:   []string{"X-Request-ID"},
-		AllowCredentials: true,
-		MaxAge:           300,
+	// ExposeHeaders left unset: authbase exposes X-Request-ID
+	// (DefaultExposeHeaders) so the browser can read it.
+	r.Use(authCfg.CORS(authbase.CORSOptions{
+		AllowedOrigins: deps.Config.CORSAllowedOrigins,
+		AllowedMethods: []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodPut, http.MethodDelete, http.MethodOptions},
 	}))
 
 	// --- Public health probes -------------------------------------------------
@@ -171,6 +185,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 		Admin:  deps.Config.AdminGroups,
 		Member: deps.Config.MemberGroups,
 		Ops:    deps.Config.OpsGroups,
+		Rule:   deps.Config.GroupMatch,
 	})
 	authMW := auth.Middleware(deps.Config, resolver, deps.OIDCVerifier)
 
@@ -181,10 +196,11 @@ func NewRouter(deps Deps, version string) http.Handler {
 	pairH := newPairingHandler(deps.Pool, deps.Config.AppBaseURL, deps.Config.CredentialKey)
 	settingsH := &orgSettingsHandler{pool: deps.Pool}
 	caller := newModuleCaller(deps.Pool, deps.Config.IsDevelopment(), deps.Config.CredentialKey, deps.Logger)
+	caller.groups = deps.Config.GroupMatch
 	if deps.ModuleHTTPClient != nil {
 		caller.hc = deps.ModuleHTTPClient
 	}
-	prefsH := &preferencesHandler{pool: deps.Pool, caller: caller, devMode: deps.Config.AuthMode == config.AuthModeDev}
+	prefsH := &preferencesHandler{pool: deps.Pool, caller: caller, devMode: deps.Config.DevAuth()}
 	auditH := &auditHandler{pool: deps.Pool}
 	modSettingsH := &moduleSettingsHandler{pool: deps.Pool, allowHTTP: deps.Config.IsDevelopment()}
 	kcSync := deps.KeycloakSync
@@ -212,13 +228,14 @@ func NewRouter(deps Deps, version string) http.Handler {
 			// pairing token in the query string. Everything else under
 			// /integrations/* is bearer-authenticated.
 			v1.Route("/integrations", func(integ chi.Router) {
-				integ.With(limitRoute(deps, "pairing-redeem")).Post("/pairing/redeem", pairH.redeem)
+				integ.With(limitRoute(deps, "pairing-redeem", ratelimit.ByClientIP)).Post("/pairing/redeem", pairH.redeem)
 
 				integ.Group(func(bearer chi.Router) {
 					bearer.Use(moduleAuth)
 					bearer.Route("/branding", brandH.integrationRoutes)
 					bearer.Get("/settings", settingsH.integrationGet)
 					bearer.Get("/module-settings", modSettingsH.integrationGet)
+					bearer.Get("/module-settings/secrets", modSettingsH.integrationSecrets)
 					bearer.Get("/bundle", brandH.integrationBundle(settingsH, modSettingsH))
 					bearer.Get("/user-preferences", prefsH.integrationGet)
 					bearer.Put("/user-preferences", prefsH.integrationPut)
@@ -226,13 +243,14 @@ func NewRouter(deps Deps, version string) http.Handler {
 			})
 
 			// --- Public: login screens need the brand before sign-in ----
-			v1.With(limitRoute(deps, "public-brand")).Route("/public", brandH.publicRoutes(settingsH))
+			v1.With(limitRoute(deps, "public-brand", ratelimit.ByClientIP)).Route("/public", brandH.publicRoutes(settingsH))
 			// One-time backup download links minted by an admin.
-			v1.With(limitRoute(deps, "backup-download")).Get("/backup-downloads/{token}", opsH.download)
+			v1.With(limitRoute(deps, "backup-download", ratelimit.ByClientIP)).Get("/backup-downloads/{token}", opsH.download)
 
 			// --- Human UI (dev header or OIDC) --------------------------
 			v1.Group(func(secure chi.Router) {
 				secure.Use(authMW)
+				secure.Use(limitRoute(deps, "signed-in", bySubject))
 
 				secure.Get("/me", meHandler)
 				secure.Get("/me/preferences", prefsH.getMine)
@@ -247,6 +265,7 @@ func NewRouter(deps Deps, version string) http.Handler {
 						modH.routes(sub)
 						sub.Post("/{id}/pairing-tokens", pairH.mintToken)
 						sub.Route("/{id}/credentials", pairH.credentialRoutes)
+						sub.Get("/{id}/settings", modSettingsH.moduleView)
 					})
 					admin.Route("/brand", brandH.humanRoutes)
 					admin.Get("/org-settings", settingsH.get)

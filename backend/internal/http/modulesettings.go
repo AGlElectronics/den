@@ -21,17 +21,22 @@ import (
 )
 
 // Module settings are the settings Den hands to paired modules (Den →
-// Module settings). Every section is optional; a missing value means "use
-// the module's own setting". Paired modules get them in the integration
-// bundle, each module only the sections it uses:
+// Module settings), as defined by the module settings contract
+// (docs: concepts/module-settings). Every key is optional; a key Den leaves
+// out means "use the module's own setting". A paired module receives
+// {"data": {…}, "updated_at": …} with the shared sections and only its own
+// section:
 //
-//	retention, smtp, identity — every module
-//	finance                    — the module with slug "finance"
-//	stash                      — slug "stash"
-//	rally                      — slug "rally" or "events"
+//	retention, smtp — every module
+//	finance         — slug "finance"
+//	stash           — slug "stash"
+//	wiki            — slug "wiki"
+//	tasks           — slug "tasks"
+//	rally           — slug "events" or "rally"
 //
-// The SMTP password is write-only: the admin API reports only whether it is
-// set; paired modules receive it in the bundle.
+// identity is Den's own (links on the portal) and is never sent. The SMTP
+// password is write-only on the admin API and never in the bundle: a module
+// fetches it from GET /api/v1/integrations/module-settings/secrets.
 
 type moduleSettingsHandler struct {
 	pool      *pgxpool.Pool
@@ -39,42 +44,73 @@ type moduleSettingsHandler struct {
 }
 
 type retentionSettings struct {
-	// PendingLegalReview is always true for now: the defaults have not been
-	// checked by a lawyer yet. Modules show it next to the values.
-	PendingLegalReview       bool    `json:"pending_legal_review"`
-	OffboardedVolunteersDays *int    `json:"offboarded_volunteers_days,omitempty"`
-	InactiveUsersDays        *int    `json:"inactive_users_days,omitempty"`
-	ModuleDataDays           *int    `json:"module_data_days,omitempty"`
-	BackupNote               *string `json:"backup_note,omitempty"`
+	OffboardedVolunteersDays *int `json:"offboarded_volunteers_days,omitempty"`
+	InactiveUsersDays        *int `json:"inactive_users_days,omitempty"`
+	ModuleDataDays           *int `json:"module_data_days,omitempty"`
 }
 
 type smtpSettings struct {
 	Host     *string `json:"host,omitempty"`
 	Port     *int    `json:"port,omitempty"`
-	From     *string `json:"from,omitempty"`
+	Security *string `json:"security,omitempty"`
 	Username *string `json:"username,omitempty"`
 	// Password is write-only on the admin API: a string sets it, null
 	// clears it, leaving it out keeps it.
 	Password    json.RawMessage `json:"password,omitempty"`
 	PasswordSet bool            `json:"password_set"`
+	From        *string         `json:"from,omitempty"`
+	FromName    *string         `json:"from_name,omitempty"`
+}
+
+type sellerSettings struct {
+	LegalName    *string `json:"legal_name,omitempty"`
+	Address      *string `json:"address,omitempty"`
+	Country      *string `json:"country,omitempty"`
+	VATID        *string `json:"vat_id,omitempty"`
+	TaxNumber    *string `json:"tax_number,omitempty"`
+	Registration *string `json:"registration,omitempty"`
+	Email        *string `json:"email,omitempty"`
+	Website      *string `json:"website,omitempty"`
 }
 
 type financeSettings struct {
-	SellerName    *string `json:"seller_name,omitempty"`
-	SellerAddress *string `json:"seller_address,omitempty"`
-	VATNumber     *string `json:"vat_number,omitempty"`
+	Seller *sellerSettings `json:"seller,omitempty"`
 }
 
-type lostAndFoundSettings struct {
-	// Mode is days_after_con (items are kept N days after the con) or
-	// hours_after_closing (items are deleted N hours after their case closes).
+// Lost & Found modes (stash.lost_found.mode).
+const (
+	lostFoundKeptAfterCon        = "kept_after_con"
+	lostFoundDeletedAfterClosing = "deleted_after_closing"
+)
+
+type lostFoundSettings struct {
 	Mode  string `json:"mode"`
 	Days  *int   `json:"days,omitempty"`
 	Hours *int   `json:"hours,omitempty"`
 }
 
 type stashSettings struct {
-	LostAndFound *lostAndFoundSettings `json:"lost_and_found,omitempty"`
+	LostFound *lostFoundSettings `json:"lost_found,omitempty"`
+}
+
+type wikiSettings struct {
+	RevisionRetentionDays *int `json:"revision_retention_days,omitempty"`
+}
+
+type tasksRetention struct {
+	TrashDays         *int `json:"trash_days,omitempty"`
+	NotificationDays  *int `json:"notification_days,omitempty"`
+	AuditDays         *int `json:"audit_days,omitempty"`
+	AutomationRunDays *int `json:"automation_run_days,omitempty"`
+}
+
+type tasksReminders struct {
+	DueSoonDays *int `json:"due_soon_days,omitempty"`
+}
+
+type tasksSettings struct {
+	Retention *tasksRetention `json:"retention,omitempty"`
+	Reminders *tasksReminders `json:"reminders,omitempty"`
 }
 
 type rallySettings struct {
@@ -92,6 +128,8 @@ type moduleSettingsDoc struct {
 	SMTP      *smtpSettings      `json:"smtp,omitempty"`
 	Finance   *financeSettings   `json:"finance,omitempty"`
 	Stash     *stashSettings     `json:"stash,omitempty"`
+	Wiki      *wikiSettings      `json:"wiki,omitempty"`
+	Tasks     *tasksSettings     `json:"tasks,omitempty"`
 	Rally     *rallySettings     `json:"rally,omitempty"`
 	Identity  *identitySettings  `json:"identity,omitempty"`
 }
@@ -101,8 +139,9 @@ type moduleSettingsSecrets struct {
 }
 
 var (
-	hostPattern = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]*[a-z0-9])?(:[0-9]{1,5})?$`)
-	vatPattern  = regexp.MustCompile(`^[A-Z]{2}[A-Z0-9]{2,13}$`)
+	hostPattern    = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]*[a-z0-9])?(:[0-9]{1,5})?$`)
+	vatPattern     = regexp.MustCompile(`^[A-Z]{2}[A-Z0-9]{2,13}$`)
+	countryPattern = regexp.MustCompile(`^[A-Z]{2}$`)
 )
 
 func trimPtr(p *string) *string {
@@ -116,8 +155,12 @@ func trimPtr(p *string) *string {
 	return &s
 }
 
-// normalize trims values, drops empty ones and returns per-field errors.
-// It returns the new SMTP password (set), whether it is cleared, or neither.
+func intPtr(v int) *int       { return &v }
+func strPtr(v string) *string { return &v }
+
+// normalize trims values, drops empty ones, fills the contract's defaults
+// and returns per-key errors. It returns the new SMTP password (set),
+// whether it is cleared, or neither.
 func (h *moduleSettingsHandler) normalize(d *moduleSettingsDoc) (fields map[string]string, newPassword *string, clearPassword bool) {
 	fields = map[string]string{}
 	intIn := func(key string, v *int, lo, hi int) {
@@ -125,6 +168,7 @@ func (h *moduleSettingsHandler) normalize(d *moduleSettingsDoc) (fields map[stri
 			fields[key] = "must be between " + strconv.Itoa(lo) + " and " + strconv.Itoa(hi)
 		}
 	}
+	days := func(key string, v *int) { intIn(key, v, 0, 3650) }
 	strMax := func(key string, p **string, max int) {
 		*p = trimPtr(*p)
 		if *p != nil && len(**p) > max {
@@ -139,13 +183,18 @@ func (h *moduleSettingsHandler) normalize(d *moduleSettingsDoc) (fields map[stri
 			}
 		}
 	}
+	emailOK := func(key string, p **string, example string) {
+		if *p = trimPtr(*p); *p != nil {
+			if _, err := mail.ParseAddress(**p); err != nil {
+				fields[key] = "must be an e-mail address, for example " + example
+			}
+		}
+	}
 
 	if r := d.Retention; r != nil {
-		r.PendingLegalReview = true
-		intIn("retention.offboarded_volunteers_days", r.OffboardedVolunteersDays, 1, 3650)
-		intIn("retention.inactive_users_days", r.InactiveUsersDays, 1, 3650)
-		intIn("retention.module_data_days", r.ModuleDataDays, 1, 3650)
-		strMax("retention.backup_note", &r.BackupNote, 2000)
+		days("retention.offboarded_volunteers_days", r.OffboardedVolunteersDays)
+		days("retention.inactive_users_days", r.InactiveUsersDays)
+		days("retention.module_data_days", r.ModuleDataDays)
 	}
 	if s := d.SMTP; s != nil {
 		if s.Host = trimPtr(s.Host); s.Host != nil {
@@ -153,13 +202,28 @@ func (h *moduleSettingsHandler) normalize(d *moduleSettingsDoc) (fields map[stri
 			if !hostPattern.MatchString(*s.Host) {
 				fields["smtp.host"] = "must be a host name such as smtp.example.org"
 			}
-		}
-		intIn("smtp.port", s.Port, 1, 65535)
-		if s.From = trimPtr(s.From); s.From != nil {
-			if _, err := mail.ParseAddress(*s.From); err != nil {
-				fields["smtp.from"] = "must be an e-mail address, for example Example Con <noreply@example.org>"
+			if s.Port == nil {
+				s.Port = intPtr(587)
+			}
+			if s.Security == nil {
+				s.Security = strPtr("starttls")
 			}
 		}
+		intIn("smtp.port", s.Port, 1, 65535)
+		if s.Security = trimPtr(s.Security); s.Security != nil {
+			*s.Security = strings.ToLower(*s.Security)
+			switch *s.Security {
+			case "starttls", "tls":
+			case "none":
+				if !h.allowHTTP {
+					fields["smtp.security"] = "none is only allowed with APP_ENV=development"
+				}
+			default:
+				fields["smtp.security"] = "must be starttls, tls or none"
+			}
+		}
+		emailOK("smtp.from", &s.From, "noreply@example.org")
+		strMax("smtp.from_name", &s.FromName, 200)
 		strMax("smtp.username", &s.Username, 256)
 		switch raw := strings.TrimSpace(string(s.Password)); {
 		case raw == "":
@@ -177,34 +241,59 @@ func (h *moduleSettingsHandler) normalize(d *moduleSettingsDoc) (fields map[stri
 		}
 		s.Password = nil
 	}
-	if f := d.Finance; f != nil {
-		strMax("finance.seller_name", &f.SellerName, 200)
-		strMax("finance.seller_address", &f.SellerAddress, 1000)
-		if f.VATNumber = trimPtr(f.VATNumber); f.VATNumber != nil {
-			v := strings.ToUpper(strings.NewReplacer(" ", "", ".", "", "-", "").Replace(*f.VATNumber))
-			f.VATNumber = &v
-			if !vatPattern.MatchString(v) {
-				fields["finance.vat_number"] = "must start with a two-letter country code, for example NL123456789B01"
+	if f := d.Finance; f != nil && f.Seller != nil {
+		s := f.Seller
+		strMax("finance.seller.legal_name", &s.LegalName, 200)
+		strMax("finance.seller.address", &s.Address, 1000)
+		if s.Country = trimPtr(s.Country); s.Country != nil {
+			*s.Country = strings.ToUpper(*s.Country)
+			if !countryPattern.MatchString(*s.Country) {
+				fields["finance.seller.country"] = "must be a two-letter ISO 3166 country code such as AT"
 			}
 		}
+		if s.VATID = trimPtr(s.VATID); s.VATID != nil {
+			v := strings.ToUpper(strings.NewReplacer(" ", "", ".", "", "-", "").Replace(*s.VATID))
+			s.VATID = &v
+			if !vatPattern.MatchString(v) {
+				fields["finance.seller.vat_id"] = "must start with a two-letter country code, for example ATU12345678"
+			}
+		}
+		strMax("finance.seller.tax_number", &s.TaxNumber, 64)
+		strMax("finance.seller.registration", &s.Registration, 200)
+		emailOK("finance.seller.email", &s.Email, "finance@example.org")
+		urlOK("finance.seller.website", &s.Website)
 	}
-	if s := d.Stash; s != nil && s.LostAndFound != nil {
-		lf := s.LostAndFound
+	if s := d.Stash; s != nil && s.LostFound != nil {
+		lf := s.LostFound
 		switch lf.Mode {
-		case "days_after_con":
+		case lostFoundKeptAfterCon:
 			lf.Hours = nil
 			if lf.Days == nil {
-				fields["stash.lost_and_found.days"] = "is required for days_after_con"
+				lf.Days = intPtr(30)
 			}
-			intIn("stash.lost_and_found.days", lf.Days, 0, 3650)
-		case "hours_after_closing":
+			days("stash.lost_found.days", lf.Days)
+		case lostFoundDeletedAfterClosing:
 			lf.Days = nil
 			if lf.Hours == nil {
-				fields["stash.lost_and_found.hours"] = "is required for hours_after_closing"
+				lf.Hours = intPtr(48)
 			}
-			intIn("stash.lost_and_found.hours", lf.Hours, 0, 8760)
+			intIn("stash.lost_found.hours", lf.Hours, 0, 8760)
 		default:
-			fields["stash.lost_and_found.mode"] = "must be days_after_con or hours_after_closing"
+			fields["stash.lost_found.mode"] = "must be kept_after_con or deleted_after_closing"
+		}
+	}
+	if w := d.Wiki; w != nil {
+		days("wiki.revision_retention_days", w.RevisionRetentionDays)
+	}
+	if t := d.Tasks; t != nil {
+		if r := t.Retention; r != nil {
+			days("tasks.retention.trash_days", r.TrashDays)
+			days("tasks.retention.notification_days", r.NotificationDays)
+			days("tasks.retention.audit_days", r.AuditDays)
+			days("tasks.retention.automation_run_days", r.AutomationRunDays)
+		}
+		if r := t.Reminders; r != nil {
+			intIn("tasks.reminders.due_soon_days", r.DueSoonDays, 0, 30)
 		}
 	}
 	if r := d.Rally; r != nil {
@@ -223,9 +312,52 @@ func (h *moduleSettingsHandler) normalize(d *moduleSettingsDoc) (fields map[stri
 	return fields, newPassword, clearPassword
 }
 
+// pruneEmpty removes objects that hold no value (after normalize dropped
+// empty strings), so a section without values is not sent at all.
+func pruneEmpty(v any) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return v
+	}
+	for k, child := range m {
+		child = pruneEmpty(child)
+		if cm, isMap := child.(map[string]any); isMap && len(cm) == 0 {
+			delete(m, k)
+			continue
+		}
+		m[k] = child
+	}
+	return m
+}
+
+// docMap is d as a JSON object without empty sections. password_set is
+// computed and never stored.
+func docMap(d moduleSettingsDoc) (map[string]any, error) {
+	raw, err := json.Marshal(d)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	if smtp, ok := m["smtp"].(map[string]any); ok {
+		delete(smtp, "password_set")
+	}
+	m, _ = pruneEmpty(m).(map[string]any)
+	return m, nil
+}
+
 type moduleSettingsDTO struct {
 	Data      moduleSettingsDoc `json:"data"`
 	UpdatedAt *string           `json:"updated_at"`
+}
+
+// moduleSettingsPayload is what a module receives: module_settings in the
+// bundle and GET /api/v1/integrations/module-settings.
+type moduleSettingsPayload struct {
+	Data      map[string]any `json:"data"`
+	UpdatedAt *string        `json:"updated_at,omitempty"`
 }
 
 func (h *moduleSettingsHandler) load(ctx context.Context, q interface {
@@ -252,10 +384,21 @@ func (h *moduleSettingsHandler) load(ctx context.Context, q interface {
 	if err := json.Unmarshal(rawSec, &sec); err != nil {
 		return doc, sec, nil, err
 	}
-	if doc.SMTP != nil {
-		doc.SMTP.PasswordSet = sec.SMTPPassword != ""
+	if sec.SMTPPassword != "" {
+		if doc.SMTP == nil {
+			doc.SMTP = &smtpSettings{}
+		}
+		doc.SMTP.PasswordSet = true
 	}
 	return doc, sec, &updated, nil
+}
+
+func formatUpdated(updated *time.Time) *string {
+	if updated == nil {
+		return nil
+	}
+	s := updated.UTC().Format(time.RFC3339)
+	return &s
 }
 
 func (h *moduleSettingsHandler) get(w http.ResponseWriter, r *http.Request) {
@@ -264,36 +407,41 @@ func (h *moduleSettingsHandler) get(w http.ResponseWriter, r *http.Request) {
 		httperror.Render(w, r, httperror.Internal(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, settingsDTO(doc, updated))
+	writeJSON(w, http.StatusOK, moduleSettingsDTO{Data: doc, UpdatedAt: formatUpdated(updated)})
 }
 
-func settingsDTO(doc moduleSettingsDoc, updated *time.Time) moduleSettingsDTO {
-	out := moduleSettingsDTO{Data: doc}
-	if updated != nil {
-		s := updated.UTC().Format(time.RFC3339)
-		out.UpdatedAt = &s
-	}
-	return out
-}
-
-// put is PUT /api/v1/module-settings: replaces the whole document (the SMTP
-// password is kept unless sent).
+// put is PUT /api/v1/module-settings with {"data": {…}}: replaces the whole
+// document (the SMTP password is kept unless sent).
 func (h *moduleSettingsHandler) put(w http.ResponseWriter, r *http.Request) {
-	var in moduleSettingsDoc
-	if err := decodeJSON(r, &in); err != nil {
+	var body struct {
+		Data *moduleSettingsDoc `json:"data"`
+		// UpdatedAt is accepted (a GET answer sent back) and ignored.
+		UpdatedAt *string `json:"updated_at"`
+	}
+	if err := decodeJSON(w, r, &body); err != nil {
 		httperror.Render(w, r, err)
 		return
 	}
+	if body.Data == nil {
+		httperror.Render(w, r, httperror.BadRequest(`request body must be {"data": {…}}`))
+		return
+	}
+	in := *body.Data
 	fields, newPassword, clearPassword := h.normalize(&in)
 	if len(fields) > 0 {
 		httperror.Render(w, r, httperror.Validation("validation failed", fields))
+		return
+	}
+	data, err := docMap(in)
+	if err != nil {
+		httperror.Render(w, r, httperror.Internal(err))
 		return
 	}
 	var (
 		saved   moduleSettingsDoc
 		updated *time.Time
 	)
-	err := auth.WithTx(r.Context(), h.pool, func(tx pgx.Tx) error {
+	err = auth.WithTx(r.Context(), h.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(r.Context(), `
 			INSERT INTO module_settings (organization_id) VALUES ($1) ON CONFLICT DO NOTHING`, defaultOrgID); err != nil {
 			return err
@@ -314,10 +462,6 @@ func (h *moduleSettingsHandler) put(w http.ResponseWriter, r *http.Request) {
 				passwordChange = "cleared"
 			}
 			sec.SMTPPassword = ""
-		}
-		data, err := json.Marshal(in)
-		if err != nil {
-			return err
 		}
 		secrets, err := json.Marshal(sec)
 		if err != nil {
@@ -345,59 +489,40 @@ func (h *moduleSettingsHandler) put(w http.ResponseWriter, r *http.Request) {
 		httperror.Render(w, r, httperror.Internal(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, settingsDTO(saved, updated))
+	writeJSON(w, http.StatusOK, moduleSettingsDTO{Data: saved, UpdatedAt: formatUpdated(updated)})
 }
 
-// moduleSection names the module-specific section a slug receives.
+// moduleSection names the module-specific section a slug receives. Rally's
+// slug is "events"; its section is "rally".
 func moduleSection(slug string) string {
 	switch slug {
-	case "finance":
-		return "finance"
-	case "stash":
-		return "stash"
+	case "finance", "stash", "wiki", "tasks":
+		return slug
 	case "rally", "events":
 		return "rally"
 	}
 	return ""
 }
 
-// forModule is what a paired module receives: the shared sections, its own
-// section, and the SMTP password in clear.
-func (h *moduleSettingsHandler) forModule(ctx context.Context, slug string) (map[string]any, error) {
-	doc, sec, updated, err := h.load(ctx, h.pool)
+// forModule is what a module with slug receives: retention, smtp (with
+// password_set, never the password) and its own section.
+func (h *moduleSettingsHandler) forModule(ctx context.Context, slug string) (moduleSettingsPayload, error) {
+	doc, _, updated, err := h.load(ctx, h.pool)
 	if err != nil {
-		return nil, err
+		return moduleSettingsPayload{}, err
 	}
-	out := map[string]any{}
-	if doc.Retention != nil {
-		out["retention"] = doc.Retention
+	all, err := docMap(doc)
+	if err != nil {
+		return moduleSettingsPayload{}, err
 	}
-	if doc.SMTP != nil {
-		smtp := map[string]any{"host": doc.SMTP.Host, "port": doc.SMTP.Port, "from": doc.SMTP.From, "username": doc.SMTP.Username}
-		if sec.SMTPPassword != "" {
-			smtp["password"] = sec.SMTPPassword
-		}
-		out["smtp"] = smtp
-	}
-	if doc.Identity != nil {
-		out["identity"] = doc.Identity
-	}
-	switch moduleSection(slug) {
-	case "finance":
-		if doc.Finance != nil {
-			out["finance"] = doc.Finance
-		}
-	case "stash":
-		if doc.Stash != nil {
-			out["stash"] = doc.Stash
-		}
-	case "rally":
-		if doc.Rally != nil {
-			out["rally"] = doc.Rally
+	out := moduleSettingsPayload{Data: map[string]any{}, UpdatedAt: formatUpdated(updated)}
+	for _, key := range []string{"retention", "smtp", moduleSection(slug)} {
+		if v, ok := all[key]; ok && key != "" {
+			out.Data[key] = v
 		}
 	}
-	if updated != nil {
-		out["updated_at"] = updated.UTC().Format(time.RFC3339)
+	if smtp, ok := out.Data["smtp"].(map[string]any); ok {
+		smtp["password_set"] = doc.SMTP != nil && doc.SMTP.PasswordSet
 	}
 	return out, nil
 }
@@ -409,6 +534,52 @@ func (h *moduleSettingsHandler) integrationGet(w http.ResponseWriter, r *http.Re
 		return
 	}
 	out, err := h.forModule(r.Context(), m.Slug)
+	if err != nil {
+		httperror.Render(w, r, httperror.Internal(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// integrationSecrets is GET /api/v1/integrations/module-settings/secrets:
+// the secret values of the calling module's settings. Keys without a value
+// are left out.
+func (h *moduleSettingsHandler) integrationSecrets(w http.ResponseWriter, r *http.Request) {
+	if _, ok := auth.EnsureModule(w, r); !ok {
+		return
+	}
+	_, sec, _, err := h.load(r.Context(), h.pool)
+	if err != nil {
+		httperror.Render(w, r, httperror.Internal(err))
+		return
+	}
+	out := map[string]any{}
+	if sec.SMTPPassword != "" {
+		out["smtp"] = map[string]string{"password": sec.SMTPPassword}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, out)
+}
+
+// moduleView is GET /api/v1/modules/{id}/settings: exactly what that module
+// receives (without secrets), for admins checking a module.
+func (h *moduleSettingsHandler) moduleView(w http.ResponseWriter, r *http.Request) {
+	id, err := parseUUIDParam(r, "id")
+	if err != nil {
+		httperror.Render(w, r, err)
+		return
+	}
+	var slug string
+	err = h.pool.QueryRow(r.Context(), `SELECT slug FROM modules WHERE id = $1 AND organization_id = $2`, id, defaultOrgID).Scan(&slug)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httperror.Render(w, r, httperror.NotFound("module"))
+		return
+	}
+	if err != nil {
+		httperror.Render(w, r, httperror.Internal(err))
+		return
+	}
+	out, err := h.forModule(r.Context(), slug)
 	if err != nil {
 		httperror.Render(w, r, httperror.Internal(err))
 		return
