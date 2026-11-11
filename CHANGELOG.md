@@ -71,6 +71,12 @@ MAJOR is the MAJOR every module is built for
 - The backend can run as several replicas: `/den-migrate` holds a Postgres
   advisory lock, so migrate initContainers starting together wait for each
   other, and backup download links live in the database.
+- Helm chart `deploy/charts/den` (still `1.0.0`, unreleased): `backend.replicas`
+  may be raised (rolling updates instead of `Recreate`), new settings
+  `DEN_OPS_GROUPS` and `IDENTITY_STAFF_MODE` in `config`,
+  `DEN_CREDENTIAL_KEY` as an optional key of `existingSecret`, and
+  `networkPolicy.allowToModules` (default on) lets den-backend reach module
+  backends on 8080 for role catalogs and to-dos.
 - Sign-in background picture, with a panel or centred layout and an optional
   caption.
 - User preferences (light, dark or system theme), shared with paired
