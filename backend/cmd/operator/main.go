@@ -17,10 +17,20 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/AGlElectronics/den/backend/internal/operator"
+	"github.com/AGlElectronics/den/backend/internal/probe"
 	"github.com/AGlElectronics/den/backend/internal/tlscert"
 )
 
 func main() {
+	// `den-operator healthcheck` probes the running operator's /livez.
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		addr := os.Getenv("OPERATOR_ADDR")
+		if addr == "" {
+			addr = ":8080"
+		}
+		probe.Run(addr)
+	}
+
 	log := zerolog.New(os.Stdout).With().Timestamp().Str("service", "den-operator").Logger()
 
 	cfg, err := operator.LoadConfig()

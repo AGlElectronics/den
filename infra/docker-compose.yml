@@ -130,8 +130,18 @@ services:
       CORS_ALLOWED_ORIGINS: http://localhost:3001
       TRUSTED_PROXY_CIDRS: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128,fc00::/7"
       DEN_PREREGISTER_MODULES: ${DEN_PREREGISTER_MODULES:-}
+      DEN_OPS_GROUPS: ${DEN_OPS_GROUPS:-den-ops}
+      IDENTITY_STAFF_MODE: ${IDENTITY_STAFF_MODE:-own}
+      # DEV ONLY: derives module credentials so Den can fetch portal to-dos.
+      DEN_CREDENTIAL_KEY: ${DEN_CREDENTIAL_KEY:-dev-only-den-credential-key-change-me}
     ports:
       - "8090:8080"
+    healthcheck:
+      test: ["CMD", "/den-server", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   frontend:
     build:
@@ -144,9 +154,16 @@ services:
       - ${FRONTEND_CONFIG:-./frontend-config/compose.json}:/etc/conservices/config.json:ro
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "3001:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/config.json"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
 volumes:
   postgres-data:
