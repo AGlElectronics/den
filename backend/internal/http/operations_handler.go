@@ -200,7 +200,7 @@ func (h *operationsHandler) download(w http.ResponseWriter, r *http.Request) {
 		renderOps(w, r, err)
 		return
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", res.Header.Get("Content-Length"))
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", path.Base(key)))

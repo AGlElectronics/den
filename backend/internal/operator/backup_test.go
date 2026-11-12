@@ -51,7 +51,10 @@ func TestRetained(t *testing.T) {
 	}
 	for k := range keep {
 		var d, h int
-		fmt.Sscanf(k, "k%d-%d", &d, &h)
+		if _, err := fmt.Sscanf(k, "k%d-%d", &d, &h); err != nil {
+			t.Errorf("key %s: %v", k, err)
+			continue
+		}
 		if d > 200 {
 			t.Errorf("%s is older than 6 months", k)
 		}

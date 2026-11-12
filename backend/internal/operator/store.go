@@ -111,7 +111,7 @@ func (s *store) readJSON(ctx context.Context, key string, v any) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer obj.Close()
+	defer func() { _ = obj.Close() }()
 	b, err := io.ReadAll(obj)
 	if err != nil {
 		if minio.ToErrorResponse(err).Code == "NoSuchKey" {

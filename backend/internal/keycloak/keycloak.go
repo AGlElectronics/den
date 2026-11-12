@@ -55,7 +55,7 @@ func (c *Client) token(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("keycloak token: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
 	if res.StatusCode >= 300 {
 		return "", fmt.Errorf("keycloak token: status %d: %s", res.StatusCode, truncate(string(body)))
@@ -91,7 +91,7 @@ func (c *Client) UpdateRealm(ctx context.Context, rep map[string]any) error {
 	if err != nil {
 		return fmt.Errorf("keycloak update realm: %w", err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
 		return fmt.Errorf("keycloak update realm: status %d: %s", res.StatusCode, truncate(string(body)))

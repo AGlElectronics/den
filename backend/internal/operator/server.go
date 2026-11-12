@@ -205,7 +205,11 @@ func (o *Operator) handleDownload(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	defer obj.Close()
+	defer func() {
+		if err := obj.Close(); err != nil {
+			o.log.Error().Err(err).Msg("close backup download")
+		}
+	}()
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
 	_, _ = io.Copy(w, obj)

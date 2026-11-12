@@ -117,7 +117,11 @@ func (o *Operator) backup(ctx context.Context, kind string, only string) (run Ru
 	if err != nil {
 		return fail(err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			o.log.Error().Err(err).Str("dir", dir).Msg("remove backup temp dir")
+		}
+	}()
 
 	man := Manifest{
 		Kind:      kind,
@@ -206,7 +210,7 @@ func (o *Operator) writeArchive(ctx context.Context, w io.Writer, dir string, ma
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		return writeEntry(tw, filepath.ToSlash(rel), fi.Size(), fi.ModTime(), f)
 	})
 	if err != nil {

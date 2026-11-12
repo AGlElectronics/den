@@ -54,7 +54,7 @@ func (c *opsClient) do(ctx context.Context, method, p string, body, out any) err
 	if err != nil {
 		return &opsError{Status: http.StatusBadGateway, Message: "Can't reach the operator: " + err.Error()}
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode >= 300 {
 		var e struct {
 			Error string `json:"error"`
@@ -82,7 +82,7 @@ func (c *opsClient) open(ctx context.Context, key string) (*http.Response, error
 		return nil, &opsError{Status: http.StatusBadGateway, Message: "Can't reach the operator: " + err.Error()}
 	}
 	if res.StatusCode != http.StatusOK {
-		res.Body.Close()
+		_ = res.Body.Close()
 		return nil, &opsError{Status: res.StatusCode, Message: "backup not available"}
 	}
 	return res, nil

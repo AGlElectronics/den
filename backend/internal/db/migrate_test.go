@@ -25,7 +25,7 @@ func TestMigrateUpConcurrently(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(ctx)
+	defer func() { _ = conn.Close(ctx) }()
 	name := fmt.Sprintf("den_migrate_test_%d", time.Now().UnixNano())
 	if _, err := conn.Exec(ctx, "CREATE DATABASE "+name); err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func TestMigrateUpConcurrently(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close(ctx)
+	defer func() { _ = db.Close(ctx) }()
 	var applied, orgs int
 	if err := db.QueryRow(ctx, `SELECT count(*) FROM goose_db_version WHERE is_applied AND version_id > 0`).Scan(&applied); err != nil {
 		t.Fatal(err)

@@ -86,7 +86,7 @@ func (c *moduleCaller) callAddr(m portalModule) (string, error) {
 	if err != nil || u.Host == "" {
 		return "", errors.New("module has no address")
 	}
-	if u.Scheme != "https" && !(u.Scheme == "http" && c.allowHTTP) {
+	if u.Scheme != "https" && (u.Scheme != "http" || !c.allowHTTP) {
 		return "", errors.New("module address is not https")
 	}
 	return strings.TrimRight(addr, "/"), nil
@@ -107,7 +107,7 @@ func (c *moduleCaller) getJSON(ctx context.Context, addr string, header http.Hea
 	if err != nil {
 		return 0, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		return res.StatusCode, fmt.Errorf("HTTP %d", res.StatusCode)
 	}
