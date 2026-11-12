@@ -132,7 +132,7 @@ MAJOR is the MAJOR every module is built for
   (`localhost:9010`, bucket `den-data-dev`), and
   `infra/frontend-config/compose.json` (dev sign-in) mounted as the web
   app's `/config.json`; set `FRONTEND_CONFIG` in `.env` to use another
-  file. Building from source needs Go 1.27.3 or newer.
+  file. Building from source needs Go 1.27.4 or newer.
 - CI on every pull request (tests, lint, Trivy scans) and signed images with
   an SBOM published to GHCR on version tags (linux/amd64; linux/arm64
   optional).
@@ -180,7 +180,7 @@ MAJOR is the MAJOR every module is built for
   `nginxinc/nginx-unprivileged:1.30.6-alpine` as UID 101 and listens on
   port 8080. The `den-operator` image is `alpine:3.24.4` with only the
   PostgreSQL 16 client tools and `age`, running as `postgres` (UID 70).
-  All images are built with Go 1.27.3 and pass the CI image scan (Trivy,
+  All images are built with Go 1.27.4 and pass the CI image scan (Trivy,
   HIGH and CRITICAL issues that have a fix).
 - A production build never falls back to dev sign-in: a `/config.json`
   without `authMode` means OIDC.

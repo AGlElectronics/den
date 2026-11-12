@@ -7,7 +7,7 @@
 # The default entrypoint is the server; the compose `migrate` service
 # overrides it with `/den-migrate`. See docs/adr/0005-no-shared-postgres.md.
 # -----------------------------------------------------------------------------
-FROM golang:1.27.3-alpine3.24 AS build
+FROM golang:1.27.4-alpine3.24 AS build
 WORKDIR /src
 
 ENV CGO_ENABLED=0 GOFLAGS=-buildvcs=false
