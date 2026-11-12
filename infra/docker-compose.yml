@@ -23,7 +23,7 @@ name: den
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine
     container_name: den-postgres
     restart: unless-stopped
     environment:

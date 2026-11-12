@@ -189,6 +189,10 @@ MAJOR is the MAJOR every module is built for
 
 ### Changed
 
+- The operator's own HTTP API is documented (status, backup schedule, backup list and download, create and drop module databases). Call it with bearer `OPERATOR_TOKEN`; the network policy admits only den-backend. Den's public Operations routes are unchanged.
+- `.env.example` lists the operator settings (`OPERATOR_ADDR`, `PG_ADMIN_URL`, `MODULE_DB_*`, `BACKUP_*`, `FILES_S3_*`) with obvious dev-only values.
+- Standalone Compose uses PostgreSQL `postgres:16.15-alpine`.
+- The Helm chart description says CI renders and lints the chart; the first production install is still pending.
 - **BREAKING:** The shared SMTP password is no longer stored in Den's
   database, and `PUT /api/v1/module-settings` rejects `smtp.password`
   (`422`). Before upgrading, copy the value from `module_settings.secrets`
