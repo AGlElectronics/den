@@ -135,13 +135,20 @@ func TestCreateAndDropDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	// Close after the drop cleanup. A defer would run first and the drop
+	// would then execute on a closed pool, leaving the database and role.
+	t.Cleanup(pool.Close)
 	o := testOperator(t, pool, true)
 	h := o.Router()
 	name := "optest_" + strings.ReplaceAll(time.Now().Format("150405.000000"), ".", "")
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DROP DATABASE IF EXISTS `+name+` WITH (FORCE)`)
-		_, _ = pool.Exec(context.Background(), `DROP ROLE IF EXISTS `+name)
+		ctx := context.Background()
+		if _, err := pool.Exec(ctx, `DROP DATABASE IF EXISTS `+name+` WITH (FORCE)`); err != nil {
+			t.Errorf("drop database %s: %v", name, err)
+		}
+		if _, err := pool.Exec(ctx, `DROP ROLE IF EXISTS `+name); err != nil {
+			t.Errorf("drop role %s: %v", name, err)
+		}
 	})
 
 	rec := call(h, http.MethodPost, "/v1/databases", "op-secret", `{"name":"`+name+`"}`)

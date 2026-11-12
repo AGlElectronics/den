@@ -45,7 +45,9 @@ func (fakeVerifier) Verify(_ context.Context, bearer string) (*auth.OIDCClaims, 
 var migrateOnce sync.Once
 
 // testPool connects to DEN_TEST_DATABASE_URL and applies the migrations once
-// per test binary. Tests skip without it.
+// per test binary. Tests skip without it. Every test that talks to that
+// database must use testPool (or newEnv). A pool opened on its own never
+// migrates, so the test fails on an empty database when it runs first.
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("DEN_TEST_DATABASE_URL")

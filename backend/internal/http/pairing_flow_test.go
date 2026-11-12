@@ -8,11 +8,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
 	"github.com/AGlElectronics/den/backend/internal/config"
@@ -20,20 +18,12 @@ import (
 )
 
 // Integration: mint pairing token → redeem once → brand profile with module bearer.
-// Skips unless DEN_TEST_DATABASE_URL is set.
+// Skips unless DEN_TEST_DATABASE_URL is set. testPool applies migrations first.
 func TestPairingMintRedeemBrand(t *testing.T) {
-	dsn := os.Getenv("DEN_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DEN_TEST_DATABASE_URL not set")
-	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pool: %v", err)
-	}
-	t.Cleanup(pool.Close)
+	pool := testPool(t)
 
-	orgID := uuid.MustParse("00000000-0000-0000-0000-00000000d001")
+	orgID := testOrgID
 	slug := "pt-" + uuid.NewString()[:12]
 	var moduleID uuid.UUID
 	if err := pool.QueryRow(ctx, `

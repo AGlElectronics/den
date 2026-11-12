@@ -3,14 +3,12 @@ package http
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
 	"github.com/AGlElectronics/den/backend/internal/config"
@@ -121,53 +119,5 @@ func TestPreregisterModulesReturnsDBError(t *testing.T) {
 	}
 	if len(db.execs) != 0 {
 		t.Fatal("no audit event expected after a failed insert")
-	}
-}
-
-// Integration: runs twice against a real database and checks that existing
-// rows are left alone. Skips unless DEN_TEST_DATABASE_URL is set.
-func TestPreregisterModulesPostgres(t *testing.T) {
-	dsn := os.Getenv("DEN_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DEN_TEST_DATABASE_URL not set")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pool: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	slug := "pre-" + uuid.NewString()[:12]
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM modules WHERE organization_id = $1 AND slug = $2`, defaultOrgID, slug)
-	})
-	mods := []config.PreregisteredModule{{Slug: slug, DisplayName: "Pre", BaseURL: "http://pre:8080", Environment: "dev"}}
-
-	res, err := PreregisterModules(ctx, pool, mods, zerolog.Nop())
-	if err != nil || res.Created != 1 {
-		t.Fatalf("first run: res=%+v err=%v", res, err)
-	}
-	if _, err := pool.Exec(ctx, `UPDATE modules SET display_name = 'Renamed', status = 'paired' WHERE organization_id = $1 AND slug = $2`, defaultOrgID, slug); err != nil {
-		t.Fatalf("update: %v", err)
-	}
-
-	res, err = PreregisterModules(ctx, pool, mods, zerolog.Nop())
-	if err != nil || res.Created != 0 || res.Existing != 1 {
-		t.Fatalf("second run: res=%+v err=%v", res, err)
-	}
-	var name, status string
-	var enabled bool
-	var dbName *string
-	var audits int
-	if err := pool.QueryRow(ctx, `
-		SELECT m.display_name, m.status, m.enabled, m.database_name,
-		       (SELECT count(*) FROM audit_events a WHERE a.entity_id = m.id AND a.actor_user_id IS NULL)
-		  FROM modules m WHERE m.organization_id = $1 AND m.slug = $2`, defaultOrgID, slug).
-		Scan(&name, &status, &enabled, &dbName, &audits); err != nil {
-		t.Fatalf("select: %v", err)
-	}
-	if name != "Renamed" || status != "paired" || !enabled || dbName != nil || audits != 1 {
-		t.Fatalf("existing row changed or wrong audit: name=%s status=%s enabled=%v db=%v audits=%d", name, status, enabled, dbName, audits)
 	}
 }

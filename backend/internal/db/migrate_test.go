@@ -25,12 +25,18 @@ func TestMigrateUpConcurrently(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = conn.Close(ctx) }()
+	// Close after the drop cleanup. A defer would run first and the drop
+	// would then execute on a closed connection, leaving the scratch database.
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
 	name := fmt.Sprintf("den_migrate_test_%d", time.Now().UnixNano())
 	if _, err := conn.Exec(ctx, "CREATE DATABASE "+name); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = conn.Exec(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)") })
+	t.Cleanup(func() {
+		if _, err := conn.Exec(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)"); err != nil {
+			t.Errorf("drop scratch database %s: %v", name, err)
+		}
+	})
 
 	u, _ := url.Parse(admin)
 	u.Path = "/" + name
