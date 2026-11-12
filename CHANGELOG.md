@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-12
+
 First release, `1.0.0`. Released versions are tagged `vMAJOR.MINOR.PATCH`;
 the images `ghcr.io/aglelectronics/den-backend`, `den-frontend` and
 `den-operator` are published as `MAJOR.MINOR.PATCH-BUILD`, where `BUILD`
