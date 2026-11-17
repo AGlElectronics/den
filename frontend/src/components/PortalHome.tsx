@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import {
   ArrowUpRight,
@@ -9,12 +10,17 @@ import {
   LifeBuoy,
   ListChecks,
   Package,
+  Plus,
   Shield,
+  Trash2,
   UsersRound,
   Warehouse,
+  X,
 } from 'lucide-react';
 
 import type { UsableModule } from '@/api/dashboard';
+import { useQuickLinks, useSaveQuickLinks, type QuickLink } from '@/api/quickLinks';
+import { PortalHerald } from '@/components/PortalHerald';
 import { PortalTodos } from '@/components/PortalTodos';
 import { cn } from '@/lib/cn';
 
@@ -97,6 +103,154 @@ function ServiceCard({ mod, preview }: { mod: UsableModule; preview?: boolean })
   );
 }
 
+function QuickLinkPill({
+  label,
+  href,
+  preview,
+  onRemove,
+}: {
+  label: string;
+  href?: string;
+  preview?: boolean;
+  onRemove?: () => void;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-den-border bg-den-surface text-sm font-medium text-den-foreground">
+      <a
+        href={preview ? undefined : href}
+        target="_blank"
+        rel="noreferrer"
+        className={cn('inline-flex items-center gap-1.5 px-3.5 py-2', 'hover:text-den-primary')}
+      >
+        {label}
+        <ExternalLink size={12} />
+      </a>
+      {onRemove && !preview ? (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="mr-1 rounded-full p-1 text-den-foreground/40 hover:bg-den-muted hover:text-den-danger"
+          aria-label={`Remove ${label}`}
+        >
+          <Trash2 size={12} />
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
+function PersonalQuickLinks({ modules, preview }: { modules: UsableModule[]; preview?: boolean }) {
+  const { data, isPending } = useQuickLinks(!preview);
+  const save = useSaveQuickLinks();
+  const [adding, setAdding] = useState(false);
+  const [label, setLabel] = useState('');
+  const [url, setUrl] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const hints = useMemo(
+    () => modules.map((m) => m.base_url).filter(Boolean).slice(0, 4),
+    [modules],
+  );
+
+  if (preview) return null;
+
+  const links = data?.links ?? [];
+
+  async function persist(next: Array<Pick<QuickLink, 'label' | 'url'> & { id?: string }>) {
+    setError(null);
+    try {
+      await save.mutateAsync(next);
+      setAdding(false);
+      setLabel('');
+      setUrl('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save quick links');
+    }
+  }
+
+  return (
+    <>
+      {isPending ? (
+        <div className="mt-3 h-10 w-48 animate-pulse rounded-full bg-den-muted" />
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {links.map((link) => (
+            <QuickLinkPill
+              key={link.id}
+              label={link.label}
+              href={link.url}
+              onRemove={() => void persist(links.filter((l) => l.id !== link.id))}
+            />
+          ))}
+          {!adding ? (
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-den-border px-3.5 py-2 text-sm font-medium text-den-foreground/70 hover:border-den-primary/40 hover:text-den-primary"
+            >
+              <Plus size={14} />
+              Add link
+            </button>
+          ) : null}
+        </div>
+      )}
+
+      {adding ? (
+        <form
+          className="mt-3 flex flex-col gap-2 rounded-2xl border border-den-border bg-den-surface p-3 sm:flex-row sm:items-end"
+          onSubmit={(ev) => {
+            ev.preventDefault();
+            void persist([...links, { label: label.trim(), url: url.trim() }]);
+          }}
+        >
+          <label className="flex flex-1 flex-col gap-1 text-xs font-medium text-den-foreground/70">
+            Label
+            <input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              className="rounded-lg border border-den-border bg-den-muted px-3 py-2 text-sm text-den-foreground"
+              placeholder="HR onboarding"
+              required
+              maxLength={80}
+            />
+          </label>
+          <label className="flex flex-[2] flex-col gap-1 text-xs font-medium text-den-foreground/70">
+            Con Services URL
+            <input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              className="rounded-lg border border-den-border bg-den-muted px-3 py-2 text-sm text-den-foreground"
+              placeholder={hints[0] ?? 'https://hr.example.org/...'}
+              required
+            />
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={save.isPending}
+              className="rounded-full bg-den-primary px-4 py-2 text-sm font-semibold text-den-surface disabled:opacity-60"
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAdding(false);
+                setError(null);
+              }}
+              className="rounded-full border border-den-border px-3 py-2 text-sm text-den-foreground/70"
+              aria-label="Cancel"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </form>
+      ) : null}
+      {error ? <p className="mt-2 text-sm text-den-danger">{error}</p> : null}
+    </>
+  );
+}
+
 export type PortalHomeProps = {
   convention: string;
   welcome: string;
@@ -149,7 +303,18 @@ export function PortalHome({
         </div>
       </section>
 
+      {!preview && !loading && modules.length > 0 ? <PortalHerald modules={modules} /> : null}
       {!preview && !loading && modules.length > 0 ? <PortalTodos modules={modules} /> : null}
+
+      {!preview && modules.length > 0 ? (
+        <section className="mt-8">
+          <h2 className="font-heading text-xl font-bold">Quick links</h2>
+          <p className="mt-1 text-sm text-den-foreground/60">
+            Your personal shortcuts into Con Services. Optional — they sit above your services.
+          </p>
+          <PersonalQuickLinks modules={modules} preview={preview} />
+        </section>
+      ) : null}
 
       <section className="mt-8">
         <h2 className="font-heading text-xl font-bold">Your services</h2>
@@ -182,29 +347,6 @@ export function PortalHome({
           </div>
         )}
       </section>
-
-      {modules.length > 0 && (
-        <section className="mt-10">
-          <h2 className="font-heading text-xl font-bold">Quick links</h2>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {modules.map((m) => (
-              <a
-                key={m.id}
-                href={preview ? undefined : m.base_url}
-                target="_blank"
-                rel="noreferrer"
-                className={cn(
-                  'inline-flex items-center gap-1.5 rounded-full border border-den-border bg-den-surface px-3.5 py-2 text-sm font-medium text-den-foreground',
-                  'hover:border-den-primary/40 hover:text-den-primary',
-                )}
-              >
-                {m.display_name}
-                <ExternalLink size={12} />
-              </a>
-            ))}
-          </div>
-        </section>
-      )}
 
       {legalFooter ? (
         <footer className="mt-12 border-t border-den-border pt-4 text-xs text-den-foreground/50">
