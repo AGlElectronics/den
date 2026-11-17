@@ -12,6 +12,8 @@
 //	GET    /api/v1/me
 //	GET    /api/v1/me/preferences
 //	PUT    /api/v1/me/preferences                — theme: system | light | dark
+//	GET    /api/v1/me/quick-links
+//	PUT    /api/v1/me/quick-links                — personal Con Services deep links
 //	GET    /api/v1/dashboard                     — member, admin
 //	GET    /api/v1/portal/todos                  — member, admin; Den asks the modules
 //
@@ -203,6 +205,11 @@ func NewRouter(deps Deps, version string) http.Handler {
 		caller.hc = deps.ModuleHTTPClient
 	}
 	prefsH := &preferencesHandler{pool: deps.Pool, caller: caller, devMode: deps.Config.DevAuth()}
+	quickH := &quickLinksHandler{
+		pool:       deps.Pool,
+		appBaseURL: deps.Config.AppBaseURL,
+		allowHTTP:  deps.Config.IsDevelopment(),
+	}
 	auditH := &auditHandler{pool: deps.Pool}
 	modSettingsH := &moduleSettingsHandler{pool: deps.Pool, allowHTTP: deps.Config.IsDevelopment()}
 	kcSync := deps.KeycloakSync
@@ -263,6 +270,8 @@ func NewRouter(deps Deps, version string) http.Handler {
 				secure.Get("/me", meHandler)
 				secure.Get("/me/preferences", prefsH.getMine)
 				secure.Put("/me/preferences", prefsH.putMine)
+				secure.Get("/me/quick-links", quickH.getMine)
+				secure.Put("/me/quick-links", quickH.putMine)
 				secure.With(auth.RequireRole(defaultOrgID, "member", "admin", "owner")).Get("/dashboard", dashboardHandler(deps.Pool, caller, modSettingsH))
 				secure.With(auth.RequireRole(defaultOrgID, "member", "admin", "owner")).Get("/portal/todos", caller.portalTodos)
 
