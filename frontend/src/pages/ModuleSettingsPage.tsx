@@ -232,6 +232,22 @@ export function ModuleSettingsPage() {
       </section>
 
       <section className={card}>
+        <h2 className="font-heading text-base font-bold">HR</h2>
+        <Field
+          label="Auto-delete pending onboardings (days)"
+          hint="Draft onboardings older than this are deleted. 0 = never. Leave empty for HR's own setting."
+          error={errors['hr.onboarding_auto_delete_days']}
+        >
+          <input
+            className={input}
+            inputMode="numeric"
+            value={d.hr?.onboarding_auto_delete_days ?? ''}
+            onChange={(e) => set('hr', { onboarding_auto_delete_days: num(e.target.value) })}
+          />
+        </Field>
+      </section>
+
+      <section className={card}>
         <h2 className="font-heading text-base font-bold">Tasks</h2>
         <div className="grid gap-3 md:grid-cols-3">
           {(

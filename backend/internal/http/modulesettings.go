@@ -32,6 +32,7 @@ import (
 //	stash           — slug "stash"
 //	wiki            — slug "wiki"
 //	tasks           — slug "tasks" (tasks.trash_days, tasks.due_soon_days, …)
+//	hr              — slug "hr" (hr.onboarding_auto_delete_days)
 //	rally           — slug "events" or "rally"
 //
 // identity is Den's own (links on the portal) and is never sent. The SMTP
@@ -108,6 +109,10 @@ type tasksSettings struct {
 	DueSoonDays       *int `json:"due_soon_days,omitempty"`
 }
 
+type hrSettings struct {
+	OnboardingAutoDeleteDays *int `json:"onboarding_auto_delete_days,omitempty"`
+}
+
 type rallySettings struct {
 	SubmissionSiteHost *string `json:"submission_site_host,omitempty"`
 }
@@ -125,6 +130,7 @@ type moduleSettingsDoc struct {
 	Stash     *stashSettings     `json:"stash,omitempty"`
 	Wiki      *wikiSettings      `json:"wiki,omitempty"`
 	Tasks     *tasksSettings     `json:"tasks,omitempty"`
+	HR        *hrSettings        `json:"hr,omitempty"`
 	Rally     *rallySettings     `json:"rally,omitempty"`
 	Identity  *identitySettings  `json:"identity,omitempty"`
 }
@@ -275,6 +281,9 @@ func (h *moduleSettingsHandler) normalize(d *moduleSettingsDoc) map[string]strin
 		days("tasks.audit_days", t.AuditDays)
 		days("tasks.automation_run_days", t.AutomationRunDays)
 		intIn("tasks.due_soon_days", t.DueSoonDays, 0, 30)
+	}
+	if hr := d.HR; hr != nil {
+		days("hr.onboarding_auto_delete_days", hr.OnboardingAutoDeleteDays)
 	}
 	if r := d.Rally; r != nil {
 		if r.SubmissionSiteHost = trimPtr(r.SubmissionSiteHost); r.SubmissionSiteHost != nil {
@@ -478,7 +487,7 @@ func (h *moduleSettingsHandler) put(w http.ResponseWriter, r *http.Request) {
 // slug is "events"; its section is "rally".
 func moduleSection(slug string) string {
 	switch slug {
-	case "finance", "stash", "wiki", "tasks":
+	case "finance", "stash", "wiki", "tasks", "hr":
 		return slug
 	case "rally", "events":
 		return "rally"
