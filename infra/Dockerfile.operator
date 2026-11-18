@@ -24,7 +24,9 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 FROM alpine:3.24.4
 # postgresql16-client creates the "postgres" user (UID/GID 70), which the
 # Kubernetes manifests and the Helm chart run the operator as.
-RUN apk add --no-cache postgresql16-client age && \
+# apk upgrade picks up Alpine security fixes published after the base tag.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache postgresql16-client age && \
     test "$(id -u postgres):$(id -g postgres)" = "70:70"
 COPY --from=build /out/den-operator /usr/local/bin/den-operator
 USER 70:70

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- Operator image runs `apk upgrade` before installing `postgresql16-client`
+  and `age`, so Alpine package CVEs fixed after the base tag are applied at
+  build time (Trivy image gate).
+
 ### Added
 
 - Module settings section **`hr`**: `hr.onboarding_auto_delete_days` (days
