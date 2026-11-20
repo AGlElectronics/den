@@ -24,10 +24,15 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 FROM alpine:3.24.4
 # postgresql16-client creates the "postgres" user (UID/GID 70), which the
 # Kubernetes manifests and the Helm chart run the operator as.
-RUN apk add --no-cache postgresql16-client age && \
+# apk upgrade picks up Alpine security fixes published after the base tag.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache postgresql16-client age && \
     test "$(id -u postgres):$(id -g postgres)" = "70:70"
 COPY --from=build /out/den-operator /usr/local/bin/den-operator
 USER 70:70
 WORKDIR /tmp
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/den-operator"]
+# Alpine operator: binary probes its own /livez (same as Compose).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["den-operator", "healthcheck"]

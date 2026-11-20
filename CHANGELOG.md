@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- Bumped `golang.org/x/crypto` to v0.59.0 (GO-2026-5932 / openpgp).
+- Dockerfiles declare `HEALTHCHECK`: backends probe `/livez` via
+  `<binary> healthcheck` (distroless has no curl); frontends use `wget` on
+  `:8080`; migrators use `HEALTHCHECK NONE`.
+
+- Frontend nginx base image moved to `nginx/nginx-unprivileged:1.30.7-alpine` (fixes nginx CRITICAL/HIGH CVEs including CVE-2026-121810; old `nginxinc/` registry no longer publishes 1.30.7).
+
+- Operator image runs `apk upgrade` before installing `postgresql16-client`
+  and `age`, so Alpine package CVEs fixed after the base tag are applied at
+  build time (Trivy image gate).
+
+### Added
+
+- Module settings section **`hr`**: `hr.onboarding_auto_delete_days` (days
+  before a stuck HR onboarding draft is deleted; `0` keeps them). Paired HR
+  receives this in its bundle slice and shows it as Managed in Den.
+- Personal **Quick links** on the portal home: each member can add Con Services
+  deep links (Den or an enabled module URL). They appear above the service
+  cards (personal only) and sync across devices via `GET`/`PUT /api/v1/me/quick-links`.
+  Links are limited to Den's own address (`APP_BASE_URL`) and enabled modules'
+  addresses; up to 20 per person. A new database table, `user_quick_links`, is
+  created by the migration that runs when Den starts; no action is needed.
+- Reserved portal slot for **Herald** unread notices. Herald does not exist
+  yet, so nothing is requested from it: the slot stays hidden unless a module
+  with the slug `herald` is paired and usable, and then shows only a link
+  into Herald.
+
+### Changed
+
+- Portal to-dos show only when the person can use **Tasks**, with an **Open
+  Tasks** link beside the heading, and at most the **four** most urgent items
+  (danger, then warning, then info; earlier due dates first). Without Tasks
+  access the to-do section is hidden.
+- The old "Quick links" row of service pills below the service cards is gone;
+  **Quick links** are now each person's own links, above the service cards.
+  Services are still reachable from the cards.
+
 ## [1.0.0] - 2026-11-12
 
 First release, `1.0.0`. Released versions are tagged `vMAJOR.MINOR.PATCH`;

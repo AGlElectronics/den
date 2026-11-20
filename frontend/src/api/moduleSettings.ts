@@ -42,6 +42,10 @@ export type TasksSettings = {
   due_soon_days?: number;
 };
 
+export type HRSettings = {
+  onboarding_auto_delete_days?: number;
+};
+
 export type ModuleSettingsData = {
   retention?: RetentionSettings;
   smtp?: SmtpSettings;
@@ -49,6 +53,7 @@ export type ModuleSettingsData = {
   stash?: { lost_found?: LostFound };
   wiki?: { revision_retention_days?: number };
   tasks?: TasksSettings;
+  hr?: HRSettings;
   rally?: { submission_site_host?: string };
   identity?: { account_console_url?: string; sso_name?: string; idp_admin_console_url?: string };
 };
