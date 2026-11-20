@@ -40,3 +40,6 @@ COPY --from=build /out/den-migrate /den-migrate
 EXPOSE 8080
 USER nonroot:nonroot
 ENTRYPOINT ["/den-server"]
+# Distroless has no curl/wget: the binary probes its own /livez.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/den-server", "healthcheck"]

@@ -33,3 +33,6 @@ USER 70:70
 WORKDIR /tmp
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/den-operator"]
+# Alpine operator: binary probes its own /livez (same as Compose).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["den-operator", "healthcheck"]
